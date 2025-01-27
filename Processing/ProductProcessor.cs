@@ -58,22 +58,22 @@ namespace PinquarkWMSSynchro.Processing
             {
                 try
                 {
-                    _logger.Information($"Processing product {product.ErpId}");
+                    _logger.Information($"Processing product {product.Symbol} ({product.ErpId})");
 
                     var result = await _apiClient.SendProductAsync(product);
 
                     if (result == 1)
                     {
-                        _logger.Information($"Product {product.ErpId} processed and sent to API successfully.");
+                        _logger.Information($"Product {product.Symbol} ({product.ErpId}) processed and sent to API successfully.");
                     }
                     else
                     {
-                        _logger.Warning($"Failed to send product {product.ErpId} to API.");
+                        _logger.Warning($"Failed to send product {product.Symbol} ({product.ErpId}) to API.");
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error(ex, $"Error processing product {product.ErpId}");
+                    _logger.Error(ex, $"Error processing product {product.Symbol} ({product.ErpId})");
                 }
             }
         }

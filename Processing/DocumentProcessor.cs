@@ -58,22 +58,22 @@ namespace PinquarkWMSSynchro.Processing
             {
                 try
                 {
-                    _logger.Information($"Processing document {document.ErpId}, with Name: {document.ErpCode}");
+                    _logger.Information($"Processing document {document.ErpCode} ({document.ErpId})");
 
                     var result = await _apiClient.SendDocumentAsync(document);
 
                     if (result == 1)
                     {
-                        _logger.Information($"Document {document.ErpId}, with Name: {document.ErpCode} processed and sent to API successfully.");
+                        _logger.Information($"Document {document.ErpCode} ({document.ErpId}) processed and sent to API successfully.");
                     }
                     else
                     {
-                        _logger.Warning($"Failed to send document {document.ErpId}, with Name: {document.ErpCode} to API.");
+                        _logger.Warning($"Failed to send document {document.ErpCode} ({document.ErpId}) to API.");
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error(ex, $"Error processing document {document.ErpId}");
+                    _logger.Error(ex, $"Error processing document {document.ErpCode} ({document.ErpId})");
                 }
             }
         }

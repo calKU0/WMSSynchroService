@@ -194,6 +194,7 @@
     <Compile Include="Models\ClientAddress.cs" />
     <Compile Include="Models\Document.cs" />
     <Compile Include="Models\DocumentClient.cs" />
+    <Compile Include="Models\DocumentPosition.cs" />
     <Compile Include="Models\DocumentElement.cs" />
     <Compile Include="Models\Image.cs" />
     <Compile Include="Models\Product.cs" />
