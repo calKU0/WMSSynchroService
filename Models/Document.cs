@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Collections.Generic;
 
 namespace PinquarkWMSSynchro.Models
 {
@@ -22,6 +18,7 @@ namespace PinquarkWMSSynchro.Models
         public int ReciepentId { get; set; }
         public string ReciepentSource { get; set; }
         public DocumentClient Contractor { get; set; }
-        public List<DocumentElement> Positions { get; set; }
+        public ClientAddress deliveryAddress { get; set; }
+        public List<DocumentPosition> Positions { get; set; }
     }
 }

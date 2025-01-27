@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-
-namespace PinquarkWMSSynchro.Models
+﻿namespace PinquarkWMSSynchro.Models
 {
     public class Image
     {
