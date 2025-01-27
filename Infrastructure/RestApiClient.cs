@@ -10,6 +10,7 @@ using System.Threading;
 using System.Xml.Linq;
 using Newtonsoft.Json.Serialization;
 using Serilog;
+using System.IO;
 
 namespace PinquarkWMSSynchro.Infrastructure
 {
@@ -76,11 +77,11 @@ namespace PinquarkWMSSynchro.Infrastructure
                     throw new Exception("Unable to retrieve authentication token.");
                 }
             }
-            catch (Exception ex) 
+            catch (Exception ex)
             {
                 throw ex;
             }
-            
+
         }
         public Task<int> SendDocumentAsync(Document document) => PostAsync("documents", document);
         public Task<int> SendProductAsync(Product product) => PostAsync("articles", product);
@@ -97,6 +98,7 @@ namespace PinquarkWMSSynchro.Infrastructure
                 _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
 
                 var response = await _httpClient.PostAsync($"{_baseUrl}/{endpoint}", content);
+                SavePayloadToFile(endpoint, json);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -116,6 +118,29 @@ namespace PinquarkWMSSynchro.Infrastructure
                       ex.Message);
                 throw;
             }
+        }
+        private void SavePayloadToFile(string endpoint, string json)
+        {
+            try
+            {
+                var logsDirectory = $@"{AppDomain.CurrentDomain.BaseDirectory}\logs\json\{endpoint}";
+                if (!Directory.Exists(logsDirectory))
+                {
+                    Directory.CreateDirectory(logsDirectory);
+                }
+
+                var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+                var fileName = $"{endpoint}_{timestamp}.json";
+                var filePath = Path.Combine(logsDirectory, fileName);
+
+                File.WriteAllText(filePath, json);
+                _logger.Information("Payload successfully saved to file: {FilePath}", filePath);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Failed to save payload to file.");
+            }
+
         }
     }
 }
