@@ -20,7 +20,7 @@ namespace PinquarkWMSSynchro
 
         public async Task<List<Document>> GetDocumentsAsync()
         {
-            List<Document> docs = new List<Document>();
+            List<Document> documents = new List<Document>();
             string procedureName = "kkur.WMSPobierzDokumenty";
 
             using (SqlConnection connection = new SqlConnection(_connectionString))
@@ -39,6 +39,8 @@ namespace PinquarkWMSSynchro
                                 DocumentType = reader["DokumentTyp"].ToString(),
                                 ErpCode = reader["PelnaNazwa"].ToString(),
                                 ErpStatusSymbol = reader["Status"].ToString(),
+                                OwnCode = reader["PelnaNazwa"].ToString(),
+                                InputDocumentNumber = reader["PelnaNazwa"].ToString(),
                                 Source = "ERP",
                                 Symbol = reader["Kod"].ToString(),
                                 Date = reader["Data"].ToString(),
@@ -46,7 +48,7 @@ namespace PinquarkWMSSynchro
                                 DeliveryMethodSymbol = reader["SposobDostawy"].ToString(),
                                 Priority = Convert.ToInt32(reader["Priorytet"]),
                                 WarehouseSymbol = reader["Magazyn"].ToString(),
-                                ReciepentId = Convert.ToInt32(reader["GidNumerOdbiorcy"]),
+                                ReciepentId = Convert.ToInt32(reader["KntNumerOdbiorcy"]),
                                 ReciepentSource = "ERP",
 
                                 Contractor = new DocumentClient()
@@ -55,12 +57,12 @@ namespace PinquarkWMSSynchro
                                     Source = "ERP"
                                 },
 
-                                deliveryAddress = new ClientAddress()
+                                DeliveryAddress = new ClientAddress()
                                 {
                                     Active = true,
                                     ContractorId = Convert.ToInt32(reader["KntNumer"]),
-                                    Code = reader["KodPocztowy"].ToString(),
                                     ContractorSource = "ERP",
+                                    Code = reader["KodPocztowy"].ToString(),
                                     Name = reader["AdresNazwa"].ToString(),
                                     PostCity = reader["Miasto"].ToString(),
                                     City = reader["Miasto"].ToString(),
@@ -72,13 +74,13 @@ namespace PinquarkWMSSynchro
                                 Positions = await GetDocumentElementsAsync(Convert.ToInt32(reader["TrnNumer"]), Convert.ToInt32(reader["TrnTyp"])),
                             };
 
-                            docs.Add(document);
+                            documents.Add(document);
                         }
                     }
                 }
             }
 
-            return docs;
+            return documents;
         }
 
         public async Task<List<DocumentPosition>> GetDocumentElementsAsync(int documentId, int documentType)
@@ -293,6 +295,7 @@ namespace PinquarkWMSSynchro
                                 Phone = reader["Telefon"].ToString(),
                                 IsSupplier = Convert.ToBoolean((int)reader["Dostawca"]),
                                 TaxNumber = reader["NIP"].ToString(),
+                                Description = reader["Opis"].ToString(),
 
                                 Address = new ClientAddress()
                                 {
@@ -359,5 +362,26 @@ namespace PinquarkWMSSynchro
             return addresses;
         }
 
+        public async Task<int> LogToTable(int id, int type, string endpoint, int success, string error = null)
+        {
+            int result = 0;
+            string procedureName = "kkur.WMSZapiszLogDoTabeli";
+            using (SqlConnection connection = new SqlConnection(_connectionString))
+            {
+                await connection.OpenAsync();
+                using (SqlCommand command = new SqlCommand(procedureName, connection))
+                {
+                    command.CommandType = CommandType.StoredProcedure;
+                    command.Parameters.Add("@EntityId", SqlDbType.Int).Value = id;
+                    command.Parameters.Add("@EntityType", SqlDbType.Int).Value = type;
+                    command.Parameters.Add("@Success", SqlDbType.TinyInt).Value = success;
+                    command.Parameters.Add("@Action", SqlDbType.VarChar).Value = endpoint;
+                    command.Parameters.Add("@Error", SqlDbType.VarChar).Value = (object)error ?? DBNull.Value;
+
+                    result = await command.ExecuteNonQueryAsync();
+                }
+            }
+            return result;
+        }
     }
 }

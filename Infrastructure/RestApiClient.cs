@@ -6,11 +6,15 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System.Threading;
 using System.Xml.Linq;
 using Newtonsoft.Json.Serialization;
 using Serilog;
 using System.IO;
+using System.Collections.Generic;
+using System.Net;
+using System.Linq;
 
 namespace PinquarkWMSSynchro.Infrastructure
 {
@@ -25,17 +29,21 @@ namespace PinquarkWMSSynchro.Infrastructure
             Formatting = Formatting.Indented
         };
         private readonly HttpClient _httpClient;
+        private readonly DatabaseRepository _database;
 
         private string _cachedToken;
         private DateTime _tokenExpirationTime;
         private readonly ILogger _logger;
 
-        public RestApiClient(HttpClient httpClient, ILogger logger)
+        public RestApiClient(DatabaseRepository database, HttpClient httpClient, ILogger logger)
         {
             _httpClient = httpClient;
             _logger = logger;
+            _database = database;
         }
-
+        public Task<int> SendDocumentAsync(Document document) => PostAsync("documents", document);
+        public Task<int> SendProductAsync(Product product) => PostAsync("articles", product);
+        public Task<int> SendClientAsync(Client client) => PostAsync("contractors", client);
         private async Task<string> GetAuthTokenAsync()
         {
             if (!string.IsNullOrEmpty(_cachedToken) && DateTime.UtcNow < _tokenExpirationTime)
@@ -83,10 +91,6 @@ namespace PinquarkWMSSynchro.Infrastructure
             }
 
         }
-        public Task<int> SendDocumentAsync(Document document) => PostAsync("documents", document);
-        public Task<int> SendProductAsync(Product product) => PostAsync("articles", product);
-        public Task<int> SendClientAsync(Client client) => PostAsync("contractors", client);
-
         private async Task<int> PostAsync<T>(string endpoint, T payload)
         {
             try
@@ -102,16 +106,18 @@ namespace PinquarkWMSSynchro.Infrastructure
 
                 if (response.IsSuccessStatusCode)
                 {
-                    return 1; // Successfully sent
+                    return 1;
                 }
                 else
                 {
                     var errorResponse = await response.Content.ReadAsStringAsync();
+                    await LogToTable(payload, endpoint, 0, $"Failed to send {typeof(T).Name}. Response: {errorResponse}");
                     throw new Exception($"Failed to send {typeof(T).Name}. Response: {errorResponse}");
                 }
             }
             catch (Exception ex)
             {
+                await LogToTable(payload, endpoint, 0, $"Error sending payload {typeof(T).Name}. Error: {ex.Message}");
                 _logger.Error(ex, "Error sending payload of type {PayloadType}. Payload: {Payload}. Error: {ErrorMessage}",
                       typeof(T).Name,
                       JsonConvert.SerializeObject(payload, Formatting.None),
@@ -119,11 +125,56 @@ namespace PinquarkWMSSynchro.Infrastructure
                 throw;
             }
         }
-        private void SavePayloadToFile(string endpoint, string json)
+        public async Task GetFeedbackAsync(bool delete)
         {
             try
             {
-                var logsDirectory = $@"{AppDomain.CurrentDomain.BaseDirectory}\logs\json\{endpoint}";
+                string[] entityArray = { "DOCUMENT", "ARTICLE", "CONTRACTOR" };
+
+                var authToken = await GetAuthTokenAsync();
+                _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
+
+                foreach (string entity in entityArray)
+                {
+                    var query = $"?delete={delete}&entity={entity}";
+                    var url = $"{_baseUrl}/feedbacks{query}";
+                    var response = await _httpClient.GetAsync(url);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var responseContent = await response.Content.ReadAsStringAsync();
+                        var feedbackList = JsonConvert.DeserializeObject<List<Feedback>>(responseContent, _jsonSettings);
+
+                        foreach (Feedback feedback in feedbackList)
+                        {
+                            var feedbackJson = JsonConvert.SerializeObject(feedback, _jsonSettings);
+                            await LogToTable(feedback.Id, feedback.Entity, Convert.ToInt32(feedback.Success), feedback.Errors.FirstOrDefault().Value);
+                            SavePayloadToFile("feedback", feedbackJson, feedback.Entity);
+                        }
+                    }
+                    else
+                    {
+                        var errorResponse = await response.Content.ReadAsStringAsync();
+                        throw new Exception($"Failed to retrieve feedback. Response: {errorResponse}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Error retrieving feedbacks");
+                throw;
+            }
+        }
+        private void SavePayloadToFile(string endpoint, string json, string entity = "")
+        {
+            try
+            {
+                string logsDirectory = "";
+                if (String.IsNullOrEmpty(entity))
+                    logsDirectory = $@"{AppDomain.CurrentDomain.BaseDirectory}\logs\json\{endpoint}";
+                else
+                    logsDirectory = $@"{AppDomain.CurrentDomain.BaseDirectory}\logs\json\{endpoint}\{entity}";
+
                 if (!Directory.Exists(logsDirectory))
                 {
                     Directory.CreateDirectory(logsDirectory);
@@ -134,13 +185,46 @@ namespace PinquarkWMSSynchro.Infrastructure
                 var filePath = Path.Combine(logsDirectory, fileName);
 
                 File.WriteAllText(filePath, json);
-                _logger.Information("Payload successfully saved to file: {FilePath}", filePath);
             }
             catch (Exception ex)
             {
                 _logger.Error(ex, "Failed to save payload to file.");
             }
+        }
 
+
+        private async Task LogToTable(object obj, string endpoint, int success, string error = "")
+        {
+            if (obj is Document document)
+            {
+                await _database.LogToTable(document.ErpId, document.ErpType, endpoint, success, error);
+            }
+            else if (obj is Product product)
+            {
+                await _database.LogToTable(product.ErpId, 16, endpoint, success, error);
+            }
+            else if (obj is Client client)
+            {
+                await _database.LogToTable(client.ErpId, 32, endpoint, success, error);
+            }
+            else
+            {
+                int type;
+                switch (endpoint)
+                {
+                    case "ARTICLE":
+                        type = 16;
+                        break;
+                    case "CONTRACTOR":
+                        type = 32;
+                        break;
+                    default:
+                        type = 0;
+                        break;
+                }
+
+                await _database.LogToTable(Convert.ToInt32(obj), type, endpoint, success, error);
+            }
         }
     }
 }

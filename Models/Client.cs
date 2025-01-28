@@ -14,5 +14,6 @@ namespace PinquarkWMSSynchro.Models
         public string Source { get; set; }
         public string Symbol { get; set; }
         public string TaxNumber { get; set; }
+        public string Description { get; set; }
     }
 }

@@ -194,14 +194,17 @@
     <Compile Include="Models\ClientAddress.cs" />
     <Compile Include="Models\Document.cs" />
     <Compile Include="Models\DocumentClient.cs" />
+    <Compile Include="Models\DocumentContact.cs" />
     <Compile Include="Models\DocumentPosition.cs" />
     <Compile Include="Models\DocumentElement.cs" />
+    <Compile Include="Models\Feedback.cs" />
     <Compile Include="Models\Image.cs" />
     <Compile Include="Models\Product.cs" />
     <Compile Include="Models\ProductProvider.cs" />
     <Compile Include="Models\ProductUnit.cs" />
     <Compile Include="Processing\ClientProcessor.cs" />
     <Compile Include="Processing\DocumentProcessor.cs" />
+    <Compile Include="Processing\FeedbackProcessor.cs" />
     <Compile Include="Processing\ProductProcessor.cs" />
     <Compile Include="ProjectInstaller.cs">
       <SubType>Component</SubType>

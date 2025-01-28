@@ -20,6 +20,7 @@ namespace PinquarkWMSSynchro
         private readonly DocumentProcessor _documentProcessor;
         private readonly ProductProcessor _productProcessor;
         private readonly ClientProcessor _clientProcessor;
+        private readonly FeedbackProcessor _feedbackProcessor;
         private CancellationTokenSource _cancellationTokenSource;
 
         public Service()
@@ -29,13 +30,14 @@ namespace PinquarkWMSSynchro
 
             try
             {
-                _restApiClient = new RestApiClient(new HttpClient(), _logger);
                 _database = new DatabaseRepository(_sqlConnectionString);
+                _restApiClient = new RestApiClient(_database, new HttpClient(), _logger);
                 _documentProcessor = new DocumentProcessor(_database, _restApiClient, _logger);
                 _productProcessor = new ProductProcessor(_database, _restApiClient, _logger);
                 _clientProcessor = new ClientProcessor(_database, _restApiClient, _logger);
+                _feedbackProcessor = new FeedbackProcessor(_restApiClient, _logger);
 
-                _logger.Information("DatabaseRepository ApiClient and Processors initialized successfully.");
+                _logger.Information("DatabaseRepository, ApiClient and Processors initialized successfully.");
             }
             catch (Exception ex)
             {
@@ -60,6 +62,9 @@ namespace PinquarkWMSSynchro
 
             _ = Task.Run(() => _documentProcessor.StartProcessingAsync(_cancellationTokenSource.Token));
             _logger.Information("Document processing started.");
+
+            _ = Task.Run(() => _feedbackProcessor.StartProcessingAsync(_cancellationTokenSource.Token));
+            _logger.Information("Feedback processing started.");
         }
 
         protected override void OnStop()
