@@ -129,14 +129,17 @@ namespace PinquarkWMSSynchro.Infrastructure
         {
             try
             {
-                string[] entityArray = { "DOCUMENT", "ARTICLE", "CONTRACTOR" };
+                Dictionary<string, int> entityArray = new Dictionary<string, int>();
+                entityArray.Add("DOCUMENT", 2033);
+                entityArray.Add("ARTICLE", 16);
+                entityArray.Add("CONTRACTOR", 32);
 
                 var authToken = await GetAuthTokenAsync();
                 _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
 
-                foreach (string entity in entityArray)
+                foreach (var entity in entityArray)
                 {
-                    var query = $"?delete={delete}&entity={entity}";
+                    var query = $"?delete={delete}&entity={entity.Key}";
                     var url = $"{_baseUrl}/feedbacks{query}";
                     var response = await _httpClient.GetAsync(url);
 
@@ -210,6 +213,8 @@ namespace PinquarkWMSSynchro.Infrastructure
             else
             {
                 int type;
+                string status;
+
                 switch (endpoint)
                 {
                     case "ARTICLE":
@@ -219,10 +224,15 @@ namespace PinquarkWMSSynchro.Infrastructure
                         type = 32;
                         break;
                     default:
-                        type = 0;
+                        type = 2033;
                         break;
                 }
+                if (success == 1)
+                    status = "Zsynchronizowano";
+                else
+                    status = "Błąd synchronizacji";
 
+                await _database.UpdateAttribute(Convert.ToInt32(obj), type, "StatusWMS", status);
                 await _database.LogToTable(Convert.ToInt32(obj), type, endpoint, success, error);
             }
         }

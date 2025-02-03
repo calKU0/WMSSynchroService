@@ -16,6 +16,7 @@ namespace PinquarkWMSSynchro
         private static ILogger _logger;
 
         private readonly DatabaseRepository _database;
+        private readonly XlApiService _xlApiService;
         private readonly RestApiClient _restApiClient;
         private readonly DocumentProcessor _documentProcessor;
         private readonly ProductProcessor _productProcessor;
@@ -30,7 +31,8 @@ namespace PinquarkWMSSynchro
 
             try
             {
-                _database = new DatabaseRepository(_sqlConnectionString);
+                _xlApiService = new XlApiService();
+                _database = new DatabaseRepository(_sqlConnectionString, _xlApiService);
                 _restApiClient = new RestApiClient(_database, new HttpClient(), _logger);
                 _documentProcessor = new DocumentProcessor(_database, _restApiClient, _logger);
                 _productProcessor = new ProductProcessor(_database, _restApiClient, _logger);
@@ -50,9 +52,18 @@ namespace PinquarkWMSSynchro
         protected override void OnStart(string[] args)
         {
             base.OnStart(args);
-            _logger.Information("Service Started");
+            _logger.Information("Service Starting");
 
             _cancellationTokenSource = new CancellationTokenSource();
+
+            int loginResult = _xlApiService.Login();
+            if (loginResult != 0)
+            {
+                _logger.Error($"Can't login to XLApi. ErrorCode: {loginResult}");
+                Stop();
+                return;
+            }
+            _logger.Information("Logged in to XLAPI");
 
             _ = Task.Run(() => _clientProcessor.StartProcessingAsync(_cancellationTokenSource.Token));
             _logger.Information("Client processing started.");
@@ -65,12 +76,19 @@ namespace PinquarkWMSSynchro
 
             _ = Task.Run(() => _feedbackProcessor.StartProcessingAsync(_cancellationTokenSource.Token));
             _logger.Information("Feedback processing started.");
+
         }
 
         protected override void OnStop()
         {
             base.OnStop();
             _cancellationTokenSource.Cancel();
+
+            int logoutResult = _xlApiService.Logout();
+            if (logoutResult != 0)
+            {
+                _logger.Error($"Can't logout from XLApi. ErrorCode: {logoutResult}");
+            }
             _logger.Information("Service Stopped");
         }
     }
