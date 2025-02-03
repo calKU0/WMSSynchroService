@@ -14,5 +14,6 @@ namespace PinquarkWMSSynchro.Models
         public List<Image> Images { get; set; }
         public List<ProductProvider> Providers { get; set; }
         public List<ProductUnit> UnitsOfMeasure { get; set; }
+        public List<Attribute> Attributes { get; set; }
     }
 }
