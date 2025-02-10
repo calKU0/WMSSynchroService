@@ -37,7 +37,18 @@ namespace PinquarkWMSSynchro.Processing
                     if (products != null)
                     {
                         _logger.Information($"Fetched {products.Count} products from database.");
-                        await ProcessProductsAsync(products);
+
+                        _logger.Information($"Processing {products.Count} products");
+                        var result = await _apiClient.SendProductAsync(products);
+
+                        if (result == 1)
+                        {
+                            _logger.Information($"Products processed and sent to API successfully.");
+                        }
+                        else
+                        {
+                            _logger.Warning($"Failed to send {products.Count} products to API.");
+                        }
                     }
                     else
                     {
@@ -50,31 +61,6 @@ namespace PinquarkWMSSynchro.Processing
                 }
 
                 await Task.Delay(TimeSpan.FromMinutes(_fetchInterval), cancellationToken);
-            }
-        }
-        private async Task ProcessProductsAsync(IEnumerable<Product> products)
-        {
-            foreach (var product in products)
-            {
-                try
-                {
-                    _logger.Information($"Processing product {product.Symbol} ({product.ErpId})");
-
-                    var result = await _apiClient.SendProductAsync(product);
-
-                    if (result == 1)
-                    {
-                        _logger.Information($"Product {product.Symbol} ({product.ErpId}) processed and sent to API successfully.");
-                    }
-                    else
-                    {
-                        _logger.Warning($"Failed to send product {product.Symbol} ({product.ErpId}) to API.");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error(ex, $"Error processing product {product.Symbol} ({product.ErpId})");
-                }
             }
         }
     }

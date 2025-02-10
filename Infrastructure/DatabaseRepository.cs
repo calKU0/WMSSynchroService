@@ -4,6 +4,7 @@ using PinquarkWMSSynchro.Models;
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -47,6 +48,7 @@ namespace PinquarkWMSSynchro
                             Document document = new Document()
                             {
                                 ErpId = Convert.ToInt32(reader["TrnNumer"]),
+                                ErpIdTxt = reader["TrnTyp"].ToString() + "|" + reader["TrnNumer"].ToString(),
                                 DocumentType = reader["DokumentTyp"].ToString(),
                                 ErpCode = reader["PelnaNazwa"].ToString(),
                                 ErpStatusSymbol = reader["Status"].ToString(),
@@ -117,7 +119,7 @@ namespace PinquarkWMSSynchro
                                 ErpId = Convert.ToInt32(reader["TwrNumer"]),
                                 Quantity = Convert.ToInt32(reader["Ilosc"]),
                                 StatusSymbol = reader["Status"].ToString(),
-                                No = 0,
+                                No = Convert.ToInt32(reader["Lp"]),
                                 Article = new DocumentElement()
                                 {
                                     ErpId = Convert.ToInt32(reader["TwrNumer"]),
@@ -273,10 +275,10 @@ namespace PinquarkWMSSynchro
                                 Unit = reader["Kod"].ToString(),
                                 Eans = new List<string> { reader["EAN"].ToString() },
                                 ConverterToMainUnit = Convert.ToInt32(reader["KonwersjaDoGlownej"]),
-                                Height = Convert.ToInt32(reader["Wysokosc"]),
-                                Length = Convert.ToInt32(reader["Dlugosc"]),
-                                Width = Convert.ToInt32(reader["Szerokosc"]),
-                                Weight = Convert.ToInt32(reader["Waga"])
+                                Height = Convert.ToDecimal(reader["Wysokosc"]),
+                                Length = Convert.ToDecimal(reader["Dlugosc"]),
+                                Width = Convert.ToDecimal(reader["Szerokosc"]),
+                                Weight = Convert.ToDecimal(reader["Waga"])
                             };
 
                             units.Add(unit);
@@ -317,16 +319,10 @@ namespace PinquarkWMSSynchro
                                     attribute.ValueDate = reader["Wartosc"].ToString();
                                     break;
                                 case "decimal":
-                                    attribute.ValueDecimal = reader["Wartosc"] != DBNull.Value ? Convert.ToDecimal(reader["Wartosc"]) : 0;
-                                    break;
-                                case "int":
-                                    attribute.ValueInt = reader["Wartosc"].ToString();
+                                    attribute.ValueDecimal = Decimal.Parse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture);
                                     break;
                                 case "text":
                                     attribute.ValueText = reader["Wartosc"].ToString();
-                                    break;
-                                case "time":
-                                    attribute.ValueTime = reader["Wartosc"].ToString();
                                     break;
                                 default:
                                     throw new Exception($"Unknown type: {attribute.Type}");
@@ -388,6 +384,7 @@ namespace PinquarkWMSSynchro
                                     Country = reader["Kraj"].ToString(),
                                 },
 
+                                Attributes = await GetClientAttributesAsync(Convert.ToInt32(reader["KntNumer"]), Convert.ToInt32(reader["KntTyp"])),
                                 //Addresses = await GetClientAddressesAsync(Convert.ToInt32(reader["KntNumer"]), Convert.ToInt32(reader["KntTyp"])),
                             };
 
@@ -398,6 +395,59 @@ namespace PinquarkWMSSynchro
             }
 
             return clients;
+        }
+        private async Task<List<Models.Attribute>> GetClientAttributesAsync(int clientId, int clientType)
+        {
+            List<Models.Attribute> attributes = new List<Models.Attribute>();
+            string procedureName = "kkur.WMSPobierzAtrybutyKontrahenta";
+
+            using (SqlConnection connection = new SqlConnection(_connectionString))
+            {
+                await connection.OpenAsync();
+                using (SqlCommand command = new SqlCommand(procedureName, connection))
+                {
+                    command.CommandType = CommandType.StoredProcedure;
+                    command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = clientId;
+                    command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = clientType;
+
+                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            Models.Attribute attribute = new Models.Attribute()
+                            {
+                                Symbol = reader["Klasa"].ToString(),
+                                Type = reader["Typ"].ToString(),
+                            };
+
+                            switch (attribute.Type.ToLower())
+                            {
+                                case "date":
+                                    attribute.ValueDate = reader["Wartosc"].ToString();
+                                    break;
+                                case "decimal":
+                                    attribute.ValueDecimal = reader["Wartosc"] != DBNull.Value ? Convert.ToDecimal(reader["Wartosc"]) : 0;
+                                    break;
+                                case "int":
+                                    attribute.ValueInt = reader["Wartosc"].ToString();
+                                    break;
+                                case "text":
+                                    attribute.ValueText = reader["Wartosc"].ToString();
+                                    break;
+                                case "time":
+                                    attribute.ValueTime = reader["Wartosc"].ToString();
+                                    break;
+                                default:
+                                    throw new Exception($"Unknown type: {attribute.Type}");
+                            }
+
+
+                            attributes.Add(attribute);
+                        }
+                    }
+                }
+            }
+            return attributes;
         }
 
         public async Task<int> UpdateAttribute(int obiNumber, int obiType, string className, string value)

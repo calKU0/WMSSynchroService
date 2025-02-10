@@ -8,9 +8,9 @@ namespace PinquarkWMSSynchro.Models
         public string Unit { get; set; }
         public int ConverterToMainUnit { get; set; }
         public List<string> Eans { get; set; }
-        public int Height { get; set; }
-        public int Length { get; set; }
-        public int Width { get; set; }
-        public int Weight { get; set; }
+        public decimal Height { get; set; }
+        public decimal Length { get; set; }
+        public decimal Width { get; set; }
+        public decimal Weight { get; set; }
     }
 }

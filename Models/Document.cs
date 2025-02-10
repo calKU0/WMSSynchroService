@@ -5,7 +5,9 @@ namespace PinquarkWMSSynchro.Models
 {
     public class Document
     {
+        [JsonIgnore]
         public int ErpId { get; set; }
+        public string ErpIdTxt { get; set; }
         public string DocumentType { get; set; }
         public string ErpCode { get; set; }
         [JsonIgnore]

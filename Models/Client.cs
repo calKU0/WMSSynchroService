@@ -5,7 +5,6 @@ namespace PinquarkWMSSynchro.Models
     public class Client
     {
         public ClientAddress Address { get; set; }
-        public List<ClientAddress> Addresses { get; set; }
         public string Email { get; set; }
         public int ErpId { get; set; }
         public bool IsSupplier { get; set; }
@@ -15,5 +14,7 @@ namespace PinquarkWMSSynchro.Models
         public string Symbol { get; set; }
         public string TaxNumber { get; set; }
         public string Description { get; set; }
+        public List<Attribute> Attributes { get; set; }
+        public List<ClientAddress> Addresses { get; set; }
     }
 }

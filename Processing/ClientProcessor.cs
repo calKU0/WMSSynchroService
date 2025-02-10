@@ -36,7 +36,18 @@ namespace PinquarkWMSSynchro.Processing
                     if (clients != null)
                     {
                         _logger.Information($"Fetched {clients.Count} clients from database.");
-                        await ProcessClientsAsync(clients);
+                        _logger.Information($"Processing {clients.Count} clients");
+
+                        var result = await _apiClient.SendClientAsync(clients);
+
+                        if (result == 1)
+                        {
+                            _logger.Information($"Clients processed and sent to API successfully.");
+                        }
+                        else
+                        {
+                            _logger.Warning($"Failed to send clients to API.");
+                        }
                     }
                     else
                     {
@@ -49,32 +60,6 @@ namespace PinquarkWMSSynchro.Processing
                 }
 
                 await Task.Delay(TimeSpan.FromMinutes(_fetchInterval), cancellationToken);
-            }
-        }
-
-        private async Task ProcessClientsAsync(IEnumerable<Client> clients)
-        {
-            foreach (var client in clients)
-            {
-                try
-                {
-                    _logger.Information($"Processing client {client.Symbol} ({client.ErpId})");
-
-                    var result = await _apiClient.SendClientAsync(client);
-
-                    if (result == 1)
-                    {
-                        _logger.Information($"Client {client.Symbol} ({client.ErpId}) processed and sent to API successfully.");
-                    }
-                    else
-                    {
-                        _logger.Warning($"Failed to send client {client.Symbol} ({client.ErpId}) to API.");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error(ex, $"Error processing client {client.Symbol} ({client.ErpId})");
-                }
             }
         }
     }

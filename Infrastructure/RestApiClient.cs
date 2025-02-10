@@ -42,8 +42,8 @@ namespace PinquarkWMSSynchro.Infrastructure
             _database = database;
         }
         public Task<int> SendDocumentAsync(Document document) => PostAsync("documents", document);
-        public Task<int> SendProductAsync(Product product) => PostAsync("articles", product);
-        public Task<int> SendClientAsync(Client client) => PostAsync("contractors", client);
+        public Task<int> SendProductAsync(List<Product> products) => PostAsync("articles", products, true);
+        public Task<int> SendClientAsync(List<Client> clients) => PostAsync("contractors", clients, true);
         private async Task<string> GetAuthTokenAsync()
         {
             if (!string.IsNullOrEmpty(_cachedToken) && DateTime.UtcNow < _tokenExpirationTime)
@@ -91,17 +91,23 @@ namespace PinquarkWMSSynchro.Infrastructure
             }
 
         }
-        private async Task<int> PostAsync<T>(string endpoint, T payload)
+        private async Task<int> PostAsync<T>(string endpoint, T payload, bool isList = false)
         {
             try
             {
+                string fullEndpoint = endpoint;
+                if (isList == true)
+                {
+                    fullEndpoint += "/list";
+                }
+
                 var authToken = await GetAuthTokenAsync();
 
                 var json = JsonConvert.SerializeObject(payload, _jsonSettings);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
                 _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
 
-                var response = await _httpClient.PostAsync($"{_baseUrl}/{endpoint}", content);
+                var response = await _httpClient.PostAsync($"{_baseUrl}/{fullEndpoint}", content);
                 SavePayloadToFile(endpoint, json);
 
                 if (response.IsSuccessStatusCode)
@@ -129,38 +135,31 @@ namespace PinquarkWMSSynchro.Infrastructure
         {
             try
             {
-                Dictionary<string, int> entityArray = new Dictionary<string, int>();
-                entityArray.Add("DOCUMENT", 2033);
-                entityArray.Add("ARTICLE", 16);
-                entityArray.Add("CONTRACTOR", 32);
-
                 var authToken = await GetAuthTokenAsync();
                 _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
 
-                foreach (var entity in entityArray)
+                var query = $"?delete={delete}";
+                var url = $"{_baseUrl}/feedbacks{query}";
+                var response = await _httpClient.GetAsync(url);
+
+                if (response.IsSuccessStatusCode)
                 {
-                    var query = $"?delete={delete}&entity={entity.Key}";
-                    var url = $"{_baseUrl}/feedbacks{query}";
-                    var response = await _httpClient.GetAsync(url);
+                    var responseContent = await response.Content.ReadAsStringAsync();
+                    var feedbackList = JsonConvert.DeserializeObject<List<Feedback>>(responseContent, _jsonSettings);
 
-                    if (response.IsSuccessStatusCode)
+                    foreach (Feedback feedback in feedbackList)
                     {
-                        var responseContent = await response.Content.ReadAsStringAsync();
-                        var feedbackList = JsonConvert.DeserializeObject<List<Feedback>>(responseContent, _jsonSettings);
-
-                        foreach (Feedback feedback in feedbackList)
-                        {
-                            var feedbackJson = JsonConvert.SerializeObject(feedback, _jsonSettings);
-                            await LogToTable(feedback.Id, feedback.Entity, Convert.ToInt32(feedback.Success), feedback.Errors.FirstOrDefault().Value);
-                            SavePayloadToFile("feedback", feedbackJson, feedback.Entity);
-                        }
-                    }
-                    else
-                    {
-                        var errorResponse = await response.Content.ReadAsStringAsync();
-                        throw new Exception($"Failed to retrieve feedback. Response: {errorResponse}");
+                        var feedbackJson = JsonConvert.SerializeObject(feedback, _jsonSettings);
+                        await LogToTable(feedback.Id, feedback.Entity, Convert.ToInt32(feedback.Success), feedback.Errors.FirstOrDefault().Value);
+                        SavePayloadToFile("feedback", feedbackJson, feedback.Entity);
                     }
                 }
+                else
+                {
+                    var errorResponse = await response.Content.ReadAsStringAsync();
+                    throw new Exception($"Failed to retrieve feedback. Response: {errorResponse}");
+                }
+
             }
             catch (Exception ex)
             {
@@ -213,18 +212,25 @@ namespace PinquarkWMSSynchro.Infrastructure
             else
             {
                 int type;
+                int id;
                 string status;
-
                 switch (endpoint)
                 {
                     case "ARTICLE":
+                        id = Convert.ToInt32(obj);
                         type = 16;
                         break;
                     case "CONTRACTOR":
+                        id = Convert.ToInt32(obj);
                         type = 32;
                         break;
+                    case "DOCUMENT":
+                        id = Convert.ToInt32(obj.ToString().Split('|')[1]);
+                        type = Convert.ToInt32(obj.ToString().Split('|')[0]);
+                        break;
                     default:
-                        type = 2033;
+                        id = Convert.ToInt32(obj);
+                        type = 0;
                         break;
                 }
                 if (success == 1)
@@ -232,8 +238,9 @@ namespace PinquarkWMSSynchro.Infrastructure
                 else
                     status = "Błąd synchronizacji";
 
-                await _database.UpdateAttribute(Convert.ToInt32(obj), type, "StatusWMS", status);
-                await _database.LogToTable(Convert.ToInt32(obj), type, endpoint, success, error);
+
+                await _database.UpdateAttribute(id, type, "StatusWMS", status);
+                await _database.LogToTable(id, type, endpoint, success, error);
             }
         }
     }
