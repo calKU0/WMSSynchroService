@@ -385,7 +385,7 @@ namespace PinquarkWMSSynchro
                                 },
 
                                 Attributes = await GetClientAttributesAsync(Convert.ToInt32(reader["KntNumer"]), Convert.ToInt32(reader["KntTyp"])),
-                                //Addresses = await GetClientAddressesAsync(Convert.ToInt32(reader["KntNumer"]), Convert.ToInt32(reader["KntTyp"])),
+                                Addresses = await GetClientAddressesAsync(Convert.ToInt32(reader["KntNumer"]), Convert.ToInt32(reader["KntTyp"])),
                             };
 
                             clients.Add(client);
@@ -470,7 +470,7 @@ namespace PinquarkWMSSynchro
                     result = await command.ExecuteNonQueryAsync();
                 }
             }
-            if (result >= 0)
+            if (result > 0)
             {
                 return 0;
             }
@@ -483,7 +483,7 @@ namespace PinquarkWMSSynchro
         private async Task<List<ClientAddress>> GetClientAddressesAsync(int clientId, int clientType)
         {
             List<ClientAddress> addresses = new List<ClientAddress>();
-            string procedureName = "kkur.WMSPobierzAdresyKontrahentow";
+            string procedureName = "kkur.WMSPobierzAdresyKontrahenta";
 
             using (SqlConnection connection = new SqlConnection(_connectionString))
             {

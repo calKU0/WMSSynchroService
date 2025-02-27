@@ -34,11 +34,9 @@ namespace PinquarkWMSSynchro.Processing
                 {
                     var products = await _database.GetProductsAsync();
 
-                    if (products != null)
+                    if (products != null && products?.Count > 0)
                     {
                         _logger.Information($"Fetched {products.Count} products from database.");
-
-                        _logger.Information($"Processing {products.Count} products");
                         var result = await _apiClient.SendProductAsync(products);
 
                         if (result == 1)

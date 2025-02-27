@@ -239,7 +239,11 @@ namespace PinquarkWMSSynchro.Infrastructure
                     status = "Błąd synchronizacji";
 
 
-                await _database.UpdateAttribute(id, type, "StatusWMS", status);
+                int result = await _database.UpdateAttribute(id, type, "StatusWMS", status);
+                if (result != 0)
+                {
+                    _logger.Error("Error while updating attribute StatusWMS: " + result.ToString());
+                }
                 await _database.LogToTable(id, type, endpoint, success, error);
             }
         }

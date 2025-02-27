@@ -33,7 +33,7 @@ namespace PinquarkWMSSynchro.Processing
                 {
                     var documents = await _database.GetDocumentsAsync();
 
-                    if (documents != null)
+                    if (documents != null && documents?.Count > 0)
                     {
                         _logger.Information($"Fetched {documents.Count} documents from database.");
                         await ProcessDocumentsAsync(documents);

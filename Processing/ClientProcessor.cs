@@ -33,10 +33,9 @@ namespace PinquarkWMSSynchro.Processing
                 {
                     var clients = await _database.GetClientsAsync();
 
-                    if (clients != null)
+                    if (clients != null && clients?.Count > 0)
                     {
                         _logger.Information($"Fetched {clients.Count} clients from database.");
-                        _logger.Information($"Processing {clients.Count} clients");
 
                         var result = await _apiClient.SendClientAsync(clients);
 
