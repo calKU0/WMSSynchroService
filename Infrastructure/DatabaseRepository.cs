@@ -30,24 +30,26 @@ namespace PinquarkWMSSynchro
 
             using (SqlConnection connection = new SqlConnection(_connectionString))
             {
-                await connection.OpenAsync();
+                await connection.OpenAsync().ConfigureAwait(false);
                 using (SqlCommand command = new SqlCommand(procedureName, connection))
                 {
                     command.CommandType = CommandType.StoredProcedure;
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    using (SqlDataReader reader = await command.ExecuteReaderAsync().ConfigureAwait(false))
                     {
-                        while (await reader.ReadAsync())
-                        {
-                            int updateResult = await UpdateAttribute(Convert.ToInt32(reader["TrnNumer"]), Convert.ToInt32(reader["TrnTyp"]), "StatusWMS", "Przetwarzane");
-                            if (updateResult != 0)
-                            {
-                                throw new Exception($"Nie udało się założyć/zaktualizować atrybutu StatusWMS na dokumencie {reader["PelnaNazwa"].ToString()}. XlApiErrorCode {updateResult}");
-                            }
+                        List<Task<int>> updateTasks = new List<Task<int>>();
+                        List<Task<List<DocumentPosition>>> positionTasks = new List<Task<List<DocumentPosition>>>();
 
+                        while (await reader.ReadAsync().ConfigureAwait(false))
+                        {
+                            int trnNumer = Convert.ToInt32(reader["TrnNumer"]);
+                            int trnTyp = Convert.ToInt32(reader["TrnTyp"]);
+
+                            updateTasks.Add(UpdateAttribute(trnNumer, trnTyp, "StatusWMS", "Przetwarzane"));
+                            positionTasks.Add(GetDocumentElementsAsync(trnNumer, trnTyp));
 
                             Document document = new Document()
                             {
-                                ErpId = Convert.ToInt32(reader["TrnNumer"]),
+                                ErpId = trnNumer,
                                 ErpIdTxt = reader["TrnTyp"].ToString() + "|" + reader["TrnNumer"].ToString(),
                                 DocumentType = reader["DokumentTyp"].ToString(),
                                 ErpCode = reader["PelnaNazwa"].ToString(),
@@ -59,7 +61,7 @@ namespace PinquarkWMSSynchro
                                 Date = reader["Data"].ToString(),
                                 Note = reader["Opis"].ToString(),
                                 DeliveryMethodSymbol = reader["SposobDostawy"].ToString(),
-                                Priority = Convert.ToInt32(reader["Priorytet"]),
+                                Priority = Convert.ToInt32(reader["Priorytet"] == DBNull.Value ? null : reader["Priorytet"]),
                                 WarehouseSymbol = reader["Magazyn"].ToString(),
                                 ReciepentId = Convert.ToInt32(reader["KntNumerOdbiorcy"]),
                                 ReciepentSource = "ERP",
@@ -82,12 +84,17 @@ namespace PinquarkWMSSynchro
                                     Street = reader["Ulica"].ToString(),
                                     Country = reader["Kraj"].ToString(),
                                     DateFrom = reader["DataOd"].ToString(),
-                                },
-
-                                Positions = await GetDocumentElementsAsync(Convert.ToInt32(reader["TrnNumer"]), Convert.ToInt32(reader["TrnTyp"])),
+                                }
                             };
 
                             documents.Add(document);
+                        }
+
+                        await Task.WhenAll(updateTasks).ConfigureAwait(false);
+                        var positionResults = await Task.WhenAll(positionTasks).ConfigureAwait(false);
+                        for (int i = 0; i < documents.Count; i++)
+                        {
+                            documents[i].Positions = positionResults[i];
                         }
                     }
                 }
@@ -145,41 +152,49 @@ namespace PinquarkWMSSynchro
 
             using (SqlConnection connection = new SqlConnection(_connectionString))
             {
-                await connection.OpenAsync();
+                await connection.OpenAsync().ConfigureAwait(false);
                 using (SqlCommand command = new SqlCommand(procedureName, connection))
                 {
                     command.CommandType = CommandType.StoredProcedure;
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    using (SqlDataReader reader = await command.ExecuteReaderAsync().ConfigureAwait(false))
                     {
-                        while (await reader.ReadAsync())
-                        {
-                            int updateResult = await UpdateAttribute(Convert.ToInt32(reader["TwrNumer"]), Convert.ToInt32(reader["TwrTyp"]), "StatusWMS", "Przetwarzane");
-                            if (updateResult != 0)
-                            {
-                                throw new Exception($"Nie udało się założyć/zaktualizować atrybutu StatusWMS na towarze {reader["Kod"].ToString()}. XlApiErrorCode {updateResult}");
-                            }
+                        List<Task> updateTasks = new List<Task>();
 
+                        while (await reader.ReadAsync().ConfigureAwait(false))
+                        {
+                            int productId = Convert.ToInt32(reader["TwrNumer"]);
+                            int productType = Convert.ToInt32(reader["TwrTyp"]);
+
+                            updateTasks.Add(UpdateAttribute(productId, productType, "StatusWMS", "Przetwarzane"));
+
+                            // Fetch product-related data in parallel
+                            var imagesTask = GetProductImagesAsync(productId, productType);
+                            var providersTask = GetProductProvidersAsync(productId, productType);
+                            var unitsTask = GetProductUnitsAsync(productId, productType);
+                            var attributesTask = GetProcuctAttributesAsync(productId, productType);
 
                             Product product = new Product()
                             {
-                                ErpId = Convert.ToInt32(reader["TwrNumer"]),
+                                ErpId = productId,
                                 Name = reader["Nazwa"].ToString(),
                                 Source = "ERP",
                                 Symbol = reader["Kod"].ToString(),
                                 Unit = reader["Jm"].ToString(),
                                 Group = reader["Grupa"].ToString(),
-                                Images = await GetProductImagesAsync(Convert.ToInt32(reader["TwrNumer"]), Convert.ToInt32(reader["TwrTyp"])),
-                                Providers = await GetProductProvidersAsync(Convert.ToInt32(reader["TwrNumer"]), Convert.ToInt32(reader["TwrTyp"])),
-                                UnitsOfMeasure = await GetProductUnitsAsync(Convert.ToInt32(reader["TwrNumer"]), Convert.ToInt32(reader["TwrTyp"])),
-                                Attributes = await GetProcuctAttributesAsync(Convert.ToInt32(reader["TwrNumer"]), Convert.ToInt32(reader["TwrTyp"]))
+
+                                Images = await imagesTask.ConfigureAwait(false),
+                                Providers = await providersTask.ConfigureAwait(false),
+                                UnitsOfMeasure = await unitsTask.ConfigureAwait(false),
+                                Attributes = await attributesTask.ConfigureAwait(false)
                             };
 
                             products.Add(product);
                         }
+
+                        await Task.WhenAll(updateTasks).ConfigureAwait(false);
                     }
                 }
             }
-
             return products;
         }
 
@@ -343,38 +358,41 @@ namespace PinquarkWMSSynchro
 
             using (SqlConnection connection = new SqlConnection(_connectionString))
             {
-                await connection.OpenAsync();
+                await connection.OpenAsync().ConfigureAwait(false);
                 using (SqlCommand command = new SqlCommand(procedureName, connection))
                 {
                     command.CommandType = CommandType.StoredProcedure;
 
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    using (SqlDataReader reader = await command.ExecuteReaderAsync().ConfigureAwait(false))
                     {
-                        while (await reader.ReadAsync())
-                        {
-                            int updateResult = await UpdateAttribute(Convert.ToInt32(reader["KntNumer"]), Convert.ToInt32(reader["KntTyp"]), "StatusWMS", "Przetwarzane");
-                            if (updateResult != 0)
-                            {
-                                throw new Exception($"Nie udało się założyć/zaktualizować atrybutu StatusWMS na towarze {reader["Akronim"].ToString()}");
-                            }
+                        List<Task> updateTasks = new List<Task>();
 
+                        while (await reader.ReadAsync().ConfigureAwait(false))
+                        {
+                            int clientId = Convert.ToInt32(reader["KntNumer"]);
+                            int clientType = Convert.ToInt32(reader["KntTyp"]);
+
+                            updateTasks.Add(UpdateAttribute(clientId, clientType, "StatusWMS", "Przetwarzane"));
+
+                            var attributesTask = GetClientAttributesAsync(clientId, clientType);
+                            var addressesTask = GetClientAddressesAsync(clientId, clientType);
 
                             Client client = new Client()
                             {
-                                ErpId = Convert.ToInt32(reader["KntNumer"]),
+                                ErpId = clientId,
                                 Symbol = reader["Akronim"].ToString(),
                                 Name = reader["Nazwa"].ToString(),
                                 Source = "ERP",
                                 Email = reader["Email"].ToString(),
                                 Phone = reader["Telefon"].ToString(),
-                                IsSupplier = Convert.ToBoolean((int)reader["Dostawca"]),
+                                IsSupplier = Convert.ToBoolean(Convert.ToInt32(reader["Dostawca"])),
                                 TaxNumber = reader["NIP"].ToString(),
                                 Description = reader["Opis"].ToString(),
 
                                 Address = new ClientAddress()
                                 {
                                     Active = true,
-                                    ContractorId = Convert.ToInt32(reader["KntNumer"]),
+                                    ContractorId = clientId,
                                     Code = reader["Akronim"].ToString(),
                                     ContractorSource = "ERP",
                                     Name = reader["Nazwa"].ToString(),
@@ -384,18 +402,23 @@ namespace PinquarkWMSSynchro
                                     Country = reader["Kraj"].ToString(),
                                 },
 
-                                Attributes = await GetClientAttributesAsync(Convert.ToInt32(reader["KntNumer"]), Convert.ToInt32(reader["KntTyp"])),
-                                Addresses = await GetClientAddressesAsync(Convert.ToInt32(reader["KntNumer"]), Convert.ToInt32(reader["KntTyp"])),
+                                // Await both tasks in parallel
+                                Attributes = await attributesTask.ConfigureAwait(false),
+                                Addresses = await addressesTask.ConfigureAwait(false),
                             };
 
                             clients.Add(client);
                         }
+
+                        // Ensure all updates are completed before proceeding
+                        await Task.WhenAll(updateTasks).ConfigureAwait(false);
                     }
                 }
             }
 
             return clients;
         }
+
         private async Task<List<Models.Attribute>> GetClientAttributesAsync(int clientId, int clientType)
         {
             List<Models.Attribute> attributes = new List<Models.Attribute>();
@@ -450,36 +473,6 @@ namespace PinquarkWMSSynchro
             return attributes;
         }
 
-        public async Task<int> UpdateAttribute(int obiNumber, int obiType, string className, string value)
-        {
-            int result = 0;
-            string procedureName = "kkur.ZaktualizujAtrybut";
-
-            using (SqlConnection connection = new SqlConnection(_connectionString))
-            {
-                await connection.OpenAsync();
-                using (SqlCommand command = new SqlCommand(procedureName, connection))
-                {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.Add("@ObjectId", SqlDbType.Int).Value = obiNumber;
-                    command.Parameters.Add("@ObjectType", SqlDbType.Int).Value = obiType;
-                    command.Parameters.Add("@ObjectLp", SqlDbType.Int).Value = 0;
-                    command.Parameters.Add("@Class", SqlDbType.VarChar).Value = className;
-                    command.Parameters.Add("@Value", SqlDbType.VarChar).Value = value;
-
-                    result = await command.ExecuteNonQueryAsync();
-                }
-            }
-            if (result > 0)
-            {
-                return 0;
-            }
-
-            result = _xlApiService.AddAttribute(obiNumber, obiType, className, value);
-
-            return result;
-        }
-
         private async Task<List<ClientAddress>> GetClientAddressesAsync(int clientId, int clientType)
         {
             List<ClientAddress> addresses = new List<ClientAddress>();
@@ -518,6 +511,36 @@ namespace PinquarkWMSSynchro
                 }
             }
             return addresses;
+        }
+
+        public async Task<int> UpdateAttribute(int obiNumber, int obiType, string className, string value)
+        {
+            int result = 0;
+            string procedureName = "kkur.ZaktualizujAtrybut";
+
+            using (SqlConnection connection = new SqlConnection(_connectionString))
+            {
+                await connection.OpenAsync();
+                using (SqlCommand command = new SqlCommand(procedureName, connection))
+                {
+                    command.CommandType = CommandType.StoredProcedure;
+                    command.Parameters.Add("@ObjectId", SqlDbType.Int).Value = obiNumber;
+                    command.Parameters.Add("@ObjectType", SqlDbType.Int).Value = obiType;
+                    command.Parameters.Add("@ObjectLp", SqlDbType.Int).Value = 0;
+                    command.Parameters.Add("@Class", SqlDbType.VarChar).Value = className;
+                    command.Parameters.Add("@Value", SqlDbType.VarChar).Value = value;
+
+                    result = await command.ExecuteNonQueryAsync();
+                }
+            }
+            if (result > 0)
+            {
+                return 0;
+            }
+
+            result = _xlApiService.AddAttribute(obiNumber, obiType, className, value);
+
+            return result;
         }
 
         public async Task<int> LogToTable(int id, int type, string endpoint, int success, string error = null)

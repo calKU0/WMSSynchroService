@@ -15,6 +15,7 @@ using System.IO;
 using System.Collections.Generic;
 using System.Net;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace PinquarkWMSSynchro.Infrastructure
 {
@@ -28,22 +29,20 @@ namespace PinquarkWMSSynchro.Infrastructure
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
             Formatting = Formatting.Indented
         };
-        private readonly HttpClient _httpClient;
         private readonly DatabaseRepository _database;
 
         private string _cachedToken;
         private DateTime _tokenExpirationTime;
         private readonly ILogger _logger;
 
-        public RestApiClient(DatabaseRepository database, HttpClient httpClient, ILogger logger)
+        public RestApiClient(DatabaseRepository database, ILogger logger)
         {
-            _httpClient = httpClient;
             _logger = logger;
             _database = database;
         }
         public Task<int> SendDocumentAsync(Document document) => PostAsync("documents", document);
-        public Task<int> SendProductAsync(List<Product> products) => PostAsync("articles", products, true);
-        public Task<int> SendClientAsync(List<Client> clients) => PostAsync("contractors", clients, true);
+        public Task<int> SendProductAsync(Product product) => PostAsync("articles", product);
+        public Task<int> SendClientAsync(Client client) => PostAsync("contractors", client);
         private async Task<string> GetAuthTokenAsync()
         {
             if (!string.IsNullOrEmpty(_cachedToken) && DateTime.UtcNow < _tokenExpirationTime)
@@ -59,30 +58,33 @@ namespace PinquarkWMSSynchro.Infrastructure
         {
             try
             {
-                var authUrl = $"{_baseUrl}/auth/sign-in";
-
-                var authData = new
+                using (HttpClient httpClient = new HttpClient())
                 {
-                    username = _username,
-                    password = _password
-                };
+                    var authUrl = $"{_baseUrl}/auth/sign-in";
 
-                var content = new StringContent(JsonConvert.SerializeObject(authData), Encoding.UTF8, "application/json");
-                var response = await _httpClient.PostAsync(authUrl, content);
-                if (response.IsSuccessStatusCode)
-                {
-                    var tokenResponse = await response.Content.ReadAsStringAsync();
-                    dynamic jsonResponse = JsonConvert.DeserializeObject(tokenResponse);
-                    var token = jsonResponse.accessToken.ToString();
-                    var expirationDateString = jsonResponse.accessTokenExpirationDate.ToString();
-                    var expirationDate = DateTimeOffset.Parse(expirationDateString).UtcDateTime;
-                    _tokenExpirationTime = expirationDate.AddSeconds(-120);
+                    var authData = new
+                    {
+                        username = _username,
+                        password = _password
+                    };
 
-                    return token;
-                }
-                else
-                {
-                    throw new Exception("Unable to retrieve authentication token.");
+                    var content = new StringContent(JsonConvert.SerializeObject(authData), Encoding.UTF8, "application/json");
+                    var response = await httpClient.PostAsync(authUrl, content);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var tokenResponse = await response.Content.ReadAsStringAsync();
+                        dynamic jsonResponse = JsonConvert.DeserializeObject(tokenResponse);
+                        var token = jsonResponse.accessToken.ToString();
+                        var expirationDateString = jsonResponse.accessTokenExpirationDate.ToString();
+                        var expirationDate = DateTimeOffset.Parse(expirationDateString).UtcDateTime;
+                        _tokenExpirationTime = expirationDate.AddSeconds(-120);
+
+                        return token;
+                    }
+                    else
+                    {
+                        throw new Exception("Unable to retrieve authentication token.");
+                    }
                 }
             }
             catch (Exception ex)
@@ -91,39 +93,36 @@ namespace PinquarkWMSSynchro.Infrastructure
             }
 
         }
-        private async Task<int> PostAsync<T>(string endpoint, T payload, bool isList = false)
+        private async Task<int> PostAsync<T>(string endpoint, T payload)
         {
             try
             {
-                string fullEndpoint = endpoint;
-                if (isList == true)
+                using (HttpClient httpClient = new HttpClient())
                 {
-                    fullEndpoint += "/list";
-                }
+                    var authToken = await GetAuthTokenAsync();
 
-                var authToken = await GetAuthTokenAsync();
+                    var json = JsonConvert.SerializeObject(payload, _jsonSettings);
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
 
-                var json = JsonConvert.SerializeObject(payload, _jsonSettings);
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
+                    var response = await httpClient.PostAsync($"{_baseUrl}/{endpoint}", content);
+                    SavePayloadToFile(endpoint, json);
 
-                var response = await _httpClient.PostAsync($"{_baseUrl}/{fullEndpoint}", content);
-                SavePayloadToFile(endpoint, json);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    return 1;
-                }
-                else
-                {
-                    var errorResponse = await response.Content.ReadAsStringAsync();
-                    await LogToTable(payload, endpoint, 0, $"Failed to send {typeof(T).Name}. Response: {errorResponse}");
-                    throw new Exception($"Failed to send {typeof(T).Name}. Response: {errorResponse}");
+                    if (response.IsSuccessStatusCode)
+                    {
+                        return 1;
+                    }
+                    else
+                    {
+                        var errorResponse = await response.Content.ReadAsStringAsync();
+                        await LogToTable(payload, endpoint, 0, $"Failed to send {typeof(T).Name}. Response: {errorResponse}");
+                        throw new Exception($"Failed to send {typeof(T).Name}. Response: {errorResponse}");
+                    }
                 }
             }
             catch (Exception ex)
             {
-                await LogToTable(payload, endpoint, 0, $"Error sending payload {typeof(T).Name}. Error: {ex.Message}");
+                await LogToTable(payload, endpoint.Replace("s", "").ToUpper(), 0, $"Error sending payload {typeof(T).Name}. Error: {ex.Message}");
                 _logger.Error(ex, "Error sending payload of type {PayloadType}. Payload: {Payload}. Error: {ErrorMessage}",
                       typeof(T).Name,
                       JsonConvert.SerializeObject(payload, Formatting.None),
@@ -135,31 +134,33 @@ namespace PinquarkWMSSynchro.Infrastructure
         {
             try
             {
-                var authToken = await GetAuthTokenAsync();
-                _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
-
-                var query = $"?delete={delete}";
-                var url = $"{_baseUrl}/feedbacks{query}";
-                var response = await _httpClient.GetAsync(url);
-
-                if (response.IsSuccessStatusCode)
+                using (HttpClient httpClient = new HttpClient())
                 {
-                    var responseContent = await response.Content.ReadAsStringAsync();
-                    var feedbackList = JsonConvert.DeserializeObject<List<Feedback>>(responseContent, _jsonSettings);
+                    var authToken = await GetAuthTokenAsync();
+                    httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
 
-                    foreach (Feedback feedback in feedbackList)
+                    var query = $"?delete={delete}";
+                    var url = $"{_baseUrl}/feedbacks{query}";
+                    var response = await httpClient.GetAsync(url);
+
+                    if (response.IsSuccessStatusCode)
                     {
-                        var feedbackJson = JsonConvert.SerializeObject(feedback, _jsonSettings);
-                        await LogToTable(feedback.Id, feedback.Entity, Convert.ToInt32(feedback.Success), feedback.Errors.FirstOrDefault().Value);
-                        SavePayloadToFile("feedback", feedbackJson, feedback.Entity);
+                        var responseContent = await response.Content.ReadAsStringAsync();
+                        var feedbackList = JsonConvert.DeserializeObject<List<Feedback>>(responseContent, _jsonSettings);
+
+                        SavePayloadToFile("feedback", responseContent, "feedback");
+                        foreach (Feedback feedback in feedbackList)
+                        {
+                            var feedbackJson = JsonConvert.SerializeObject(feedback, _jsonSettings);
+                            await LogToTable(feedback.Id, feedback.Entity, Convert.ToInt32(feedback.Success), feedback.Errors.FirstOrDefault().Value);
+                        }
+                    }
+                    else
+                    {
+                        var errorResponse = await response.Content.ReadAsStringAsync();
+                        throw new Exception($"Failed to retrieve feedback. Response: {errorResponse}");
                     }
                 }
-                else
-                {
-                    var errorResponse = await response.Content.ReadAsStringAsync();
-                    throw new Exception($"Failed to retrieve feedback. Response: {errorResponse}");
-                }
-
             }
             catch (Exception ex)
             {
@@ -171,19 +172,38 @@ namespace PinquarkWMSSynchro.Infrastructure
         {
             try
             {
-                string logsDirectory = "";
-                if (String.IsNullOrEmpty(entity))
-                    logsDirectory = $@"{AppDomain.CurrentDomain.BaseDirectory}\logs\json\{endpoint}";
-                else
-                    logsDirectory = $@"{AppDomain.CurrentDomain.BaseDirectory}\logs\json\{endpoint}\{entity}";
+                string logsDirectory = $@"{AppDomain.CurrentDomain.BaseDirectory}\logs\json\{endpoint}";
 
                 if (!Directory.Exists(logsDirectory))
                 {
                     Directory.CreateDirectory(logsDirectory);
                 }
 
-                var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-                var fileName = $"{endpoint}_{timestamp}.json";
+                var timestamp = DateTime.UtcNow.ToString("yyyy_MM_dd_HH_mm_ss_fff");
+
+                JToken jsonToken = JToken.Parse(json);
+                string symbol = null;
+
+                if (jsonToken is JArray jsonArray && jsonArray.Count > 0)
+                {
+                    symbol = jsonArray[0]["symbol"]?.ToString();
+                }
+                else if (jsonToken is JObject jsonObject)
+                {
+                    symbol = jsonObject["symbol"]?.ToString();
+                }
+
+                string fileName;
+                if (!string.IsNullOrEmpty(symbol))
+                {
+                    symbol = SanitizeFileName(symbol);
+                    fileName = $"{symbol}_{timestamp:yyyy_MM_dd_HH_mm_ss_fff}.json";
+                }
+                else
+                {
+                    fileName = $"{endpoint}_{timestamp:yyyy_MM_dd_HH_mm_ss_fff}.json";
+                }
+
                 var filePath = Path.Combine(logsDirectory, fileName);
 
                 File.WriteAllText(filePath, json);
@@ -194,6 +214,10 @@ namespace PinquarkWMSSynchro.Infrastructure
             }
         }
 
+        private string SanitizeFileName(string fileName)
+        {
+            return Regex.Replace(fileName, @"[<>:""/\\|?*]", "_");
+        }
 
         private async Task LogToTable(object obj, string endpoint, int success, string error = "")
         {

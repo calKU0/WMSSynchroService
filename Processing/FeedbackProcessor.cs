@@ -36,8 +36,10 @@ namespace PinquarkWMSSynchro.Processing
                 {
                     _logger.Error(ex, $"Error processing feedback");
                 }
-
-                await Task.Delay(TimeSpan.FromMinutes(_fetchInterval), cancellationToken);
+                finally
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(_fetchInterval), cancellationToken);
+                }
             }
         }
     }

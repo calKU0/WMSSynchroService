@@ -33,7 +33,7 @@ namespace PinquarkWMSSynchro
             {
                 _xlApiService = new XlApiService();
                 _database = new DatabaseRepository(_sqlConnectionString, _xlApiService);
-                _restApiClient = new RestApiClient(_database, new HttpClient(), _logger);
+                _restApiClient = new RestApiClient(_database, _logger);
                 _documentProcessor = new DocumentProcessor(_database, _restApiClient, _logger);
                 _productProcessor = new ProductProcessor(_database, _restApiClient, _logger);
                 _clientProcessor = new ClientProcessor(_database, _restApiClient, _logger);

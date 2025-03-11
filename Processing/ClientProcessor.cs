@@ -4,6 +4,7 @@ using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,20 +34,12 @@ namespace PinquarkWMSSynchro.Processing
                 {
                     var clients = await _database.GetClientsAsync();
 
-                    if (clients != null && clients?.Count > 0)
+                    if (clients?.Count > 0)
                     {
                         _logger.Information($"Fetched {clients.Count} clients from database.");
 
-                        var result = await _apiClient.SendClientAsync(clients);
-
-                        if (result == 1)
-                        {
-                            _logger.Information($"Clients processed and sent to API successfully.");
-                        }
-                        else
-                        {
-                            _logger.Warning($"Failed to send clients to API.");
-                        }
+                        var tasks = clients.Select(ProccessClientAsync);
+                        await Task.WhenAll(tasks);
                     }
                     else
                     {
@@ -55,10 +48,34 @@ namespace PinquarkWMSSynchro.Processing
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error(ex, "Error while fetching clients from database.");
+                    _logger.Error(ex, "Error while fetching or processing clients.");
                 }
 
-                await Task.Delay(TimeSpan.FromMinutes(_fetchInterval), cancellationToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(_fetchInterval), cancellationToken);
+                }
+                catch (TaskCanceledException) { }
+            }
+        }
+
+        private async Task ProccessClientAsync(Client client)
+        {
+            try
+            {
+                var result = await _apiClient.SendClientAsync(client);
+                if (result == 1)
+                {
+                    _logger.Information($"Client {client.Symbol} ({client.ErpId}) processed and send to API successfully.");
+                }
+                else
+                {
+                    _logger.Warning($"Failed to send client {client.Name} ({client.ErpId}) to API.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, $"Error processing client {client.Symbol} ({client.ErpId}).");
             }
         }
     }

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Threading;
 using System;
 using System.Configuration;
+using System.Linq;
 
 namespace PinquarkWMSSynchro.Processing
 {
@@ -36,7 +37,9 @@ namespace PinquarkWMSSynchro.Processing
                     if (documents != null && documents?.Count > 0)
                     {
                         _logger.Information($"Fetched {documents.Count} documents from database.");
-                        await ProcessDocumentsAsync(documents);
+
+                        var tasks = documents.Select(ProcessDocumentAsync);
+                        await Task.WhenAll(tasks);
                     }
                     else
                     {
@@ -45,36 +48,37 @@ namespace PinquarkWMSSynchro.Processing
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error(ex, "Error while fetching documents from database.");
+                    _logger.Error(ex, "Error while fetching or processing products.");
                 }
 
-                await Task.Delay(TimeSpan.FromMinutes(_fetchInterval), cancellationToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(_fetchInterval), cancellationToken);
+                }
+                catch (TaskCanceledException) { }
             }
         }
 
-        private async Task ProcessDocumentsAsync(IEnumerable<Document> documents)
+        private async Task ProcessDocumentAsync(Document document)
         {
-            foreach (var document in documents)
+            try
             {
-                try
-                {
-                    _logger.Information($"Processing document {document.ErpCode} ({document.ErpId})");
+                _logger.Information($"Processing document {document.ErpCode} ({document.ErpId})");
 
-                    var result = await _apiClient.SendDocumentAsync(document);
+                var result = await _apiClient.SendDocumentAsync(document);
 
-                    if (result == 1)
-                    {
-                        _logger.Information($"Document {document.ErpCode} ({document.ErpId}) processed and sent to API successfully.");
-                    }
-                    else
-                    {
-                        _logger.Warning($"Failed to send document {document.ErpCode} ({document.ErpId}) to API.");
-                    }
-                }
-                catch (Exception ex)
+                if (result == 1)
                 {
-                    _logger.Error(ex, $"Error processing document {document.ErpCode} ({document.ErpId})");
+                    _logger.Information($"Document {document.ErpCode} ({document.ErpId}) processed and sent to API successfully.");
                 }
+                else
+                {
+                    _logger.Warning($"Failed to send document {document.ErpCode} ({document.ErpId}) to API.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, $"Error processing document {document.ErpCode} ({document.ErpId})");
             }
         }
     }

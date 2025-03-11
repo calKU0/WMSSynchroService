@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.10.35122.118
+VisualStudioVersion = 17.13.35825.156 d17.13
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PinquarkWMSSynchro", "PinquarkWMSSynchro.csproj", "{A96743D8-5F2E-414F-941D-EE75A3632896}"
 EndProject
@@ -20,6 +20,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {856C2D76-FCD1-40D0-991A-CB491F92F485}
+		SolutionGuid = {9BFFF45D-0680-4B1A-9D10-55E6F9DC5613}
 	EndGlobalSection
 EndGlobal

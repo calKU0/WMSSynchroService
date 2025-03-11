@@ -34,19 +34,12 @@ namespace PinquarkWMSSynchro.Processing
                 {
                     var products = await _database.GetProductsAsync();
 
-                    if (products != null && products?.Count > 0)
+                    if (products?.Count > 0)
                     {
                         _logger.Information($"Fetched {products.Count} products from database.");
-                        var result = await _apiClient.SendProductAsync(products);
 
-                        if (result == 1)
-                        {
-                            _logger.Information($"Products processed and sent to API successfully.");
-                        }
-                        else
-                        {
-                            _logger.Warning($"Failed to send {products.Count} products to API.");
-                        }
+                        var tasks = products.Select(ProcessProductAsync);
+                        await Task.WhenAll(tasks);
                     }
                     else
                     {
@@ -55,10 +48,35 @@ namespace PinquarkWMSSynchro.Processing
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error(ex, "Error while fetching products from database.");
+                    _logger.Error(ex, "Error while fetching or processing products.");
                 }
 
-                await Task.Delay(TimeSpan.FromMinutes(_fetchInterval), cancellationToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(_fetchInterval), cancellationToken);
+                }
+                catch (TaskCanceledException) { }
+            }
+        }
+
+        private async Task ProcessProductAsync(Product product)
+        {
+            try
+            {
+                var result = await _apiClient.SendProductAsync(product);
+
+                if (result == 1)
+                {
+                    _logger.Information($"Product {product.Symbol} ({product.ErpId}) processed and send to API successfully.");
+                }
+                else
+                {
+                    _logger.Warning($"Failed to send product {product.Symbol} ({product.ErpId}) to API.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, $"Error processing product {product.Symbol} ({product.ErpId}).");
             }
         }
     }
