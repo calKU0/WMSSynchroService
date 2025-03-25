@@ -6,16 +6,16 @@ namespace PinquarkWMSSynchro.Infrastructure
 {
     public static class SerilogConfig
     {
-        public static Logger ConfigureLogger()
+        public static Logger ConfigureLogger(int retainLogDays)
         {
             string path = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
             return new LoggerConfiguration()
                 .MinimumLevel.Information()
                 .WriteTo.File(
-                    $@"{path}\log-.txt", 
+                    $@"{path}\log-.txt",
                     rollingInterval: RollingInterval.Day,
-                    retainedFileCountLimit: 31      
-                ) 
+                    retainedFileCountLimit: retainLogDays
+                )
                 .CreateLogger();
         }
     }

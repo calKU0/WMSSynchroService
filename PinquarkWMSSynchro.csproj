@@ -210,6 +210,7 @@
     <Compile Include="Processing\ClientProcessor.cs" />
     <Compile Include="Processing\DocumentProcessor.cs" />
     <Compile Include="Processing\FeedbackProcessor.cs" />
+    <Compile Include="Processing\LogCleanupProcessor.cs" />
     <Compile Include="Processing\ProductProcessor.cs" />
     <Compile Include="ProjectInstaller.cs">
       <SubType>Component</SubType>

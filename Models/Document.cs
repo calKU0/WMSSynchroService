@@ -27,5 +27,6 @@ namespace PinquarkWMSSynchro.Models
         public DocumentClient Contractor { get; set; }
         public ClientAddress DeliveryAddress { get; set; }
         public List<DocumentPosition> Positions { get; set; }
+        public List<Attribute> Attributes { get; set; }
     }
 }

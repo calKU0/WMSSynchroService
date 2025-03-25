@@ -17,13 +17,15 @@ namespace PinquarkWMSSynchro.Processing
         private readonly RestApiClient _apiClient;
         private readonly ILogger _logger;
         private readonly int _fetchInterval;
+        private readonly int _batchSizePerRequest;
 
-        public ClientProcessor(DatabaseRepository databaseRepository, RestApiClient apiClient, ILogger logger)
+        public ClientProcessor(DatabaseRepository database, RestApiClient apiClient, ILogger logger, int batchSizePerRequest)
         {
-            _database = databaseRepository;
+            _database = database;
             _apiClient = apiClient;
             _logger = logger;
             _fetchInterval = Convert.ToInt32(ConfigurationManager.AppSettings["Co ile minut pobierac kontrahentow"]);
+            _batchSizePerRequest = batchSizePerRequest;
         }
 
         public async Task StartProcessingAsync(CancellationToken cancellationToken)
@@ -38,8 +40,11 @@ namespace PinquarkWMSSynchro.Processing
                     {
                         _logger.Information($"Fetched {clients.Count} clients from database.");
 
-                        var tasks = clients.Select(ProccessClientAsync);
-                        await Task.WhenAll(tasks);
+                        var batches = await SplitIntoBatchesAsync(clients, _batchSizePerRequest);
+                        foreach (var batch in batches)
+                        {
+                            await ProcessClientBatchAsync(batch);
+                        }
                     }
                     else
                     {
@@ -59,24 +64,36 @@ namespace PinquarkWMSSynchro.Processing
             }
         }
 
-        private async Task ProccessClientAsync(Client client)
+        private async Task ProcessClientBatchAsync(List<Client> batch)
         {
             try
             {
-                var result = await _apiClient.SendClientAsync(client);
+                var result = await _apiClient.SendClientsAsync(batch);
+
                 if (result == 1)
                 {
-                    _logger.Information($"Client {client.Symbol} ({client.ErpId}) processed and send to API successfully.");
+                    _logger.Information($"Batch of {batch.Count} clients processed and sent to API successfully.");
                 }
                 else
                 {
-                    _logger.Warning($"Failed to send client {client.Name} ({client.ErpId}) to API.");
+                    _logger.Warning($"Failed to send batch of {batch.Count} clients to API.");
                 }
             }
             catch (Exception ex)
             {
-                _logger.Error(ex, $"Error processing client {client.Symbol} ({client.ErpId}).");
+                _logger.Error(ex, $"Error processing batch of {batch.Count} clients.");
             }
+        }
+
+        private async Task<List<List<Client>>> SplitIntoBatchesAsync(List<Client> clients, int batchSize)
+        {
+            return await Task.Run(() =>
+                clients
+                    .Select((client, index) => new { client, index })
+                    .GroupBy(x => x.index / batchSize)
+                    .Select(g => g.Select(x => x.client).ToList())
+                    .ToList()
+            );
         }
     }
 }

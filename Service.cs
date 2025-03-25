@@ -6,13 +6,14 @@ using Serilog;
 using PinquarkWMSSynchro.Infrastructure;
 using PinquarkWMSSynchro.Processing;
 using System.Threading;
-using System.Net.Http;
 
 namespace PinquarkWMSSynchro
 {
     public partial class Service : ServiceBase
     {
         private readonly string _sqlConnectionString = ConfigurationManager.ConnectionStrings["GaskaConnectionString"].ConnectionString;
+        private readonly int _retainLogDays = Convert.ToInt32(ConfigurationManager.AppSettings["Po ilu dniach usuwac logi"]);
+        private readonly int _batchSizePerRequest = Convert.ToInt32(ConfigurationManager.AppSettings["Ile obiektów wysyłac per request"]);
         private static ILogger _logger;
 
         private readonly DatabaseRepository _database;
@@ -22,22 +23,24 @@ namespace PinquarkWMSSynchro
         private readonly ProductProcessor _productProcessor;
         private readonly ClientProcessor _clientProcessor;
         private readonly FeedbackProcessor _feedbackProcessor;
+        private readonly LogCleanupProcessor _logCleanupProcessor;
         private CancellationTokenSource _cancellationTokenSource;
 
         public Service()
         {
             InitializeComponent();
-            _logger = SerilogConfig.ConfigureLogger();
+            _logger = SerilogConfig.ConfigureLogger(_retainLogDays);
 
             try
             {
                 _xlApiService = new XlApiService();
                 _database = new DatabaseRepository(_sqlConnectionString, _xlApiService);
                 _restApiClient = new RestApiClient(_database, _logger);
-                _documentProcessor = new DocumentProcessor(_database, _restApiClient, _logger);
-                _productProcessor = new ProductProcessor(_database, _restApiClient, _logger);
-                _clientProcessor = new ClientProcessor(_database, _restApiClient, _logger);
+                _documentProcessor = new DocumentProcessor(_database, _restApiClient, _logger, _batchSizePerRequest);
+                _productProcessor = new ProductProcessor(_database, _restApiClient, _logger, _batchSizePerRequest);
+                _clientProcessor = new ClientProcessor(_database, _restApiClient, _logger, _batchSizePerRequest);
                 _feedbackProcessor = new FeedbackProcessor(_restApiClient, _logger);
+                _logCleanupProcessor = new LogCleanupProcessor(_retainLogDays, _logger);
 
                 _logger.Information("DatabaseRepository, ApiClient and Processors initialized successfully.");
             }
@@ -76,6 +79,10 @@ namespace PinquarkWMSSynchro
 
             _ = Task.Run(() => _feedbackProcessor.StartProcessingAsync(_cancellationTokenSource.Token));
             _logger.Information("Feedback processing started.");
+
+            _ = Task.Run(() => _logCleanupProcessor.StartProcessingAsync(_cancellationTokenSource.Token));
+            _logger.Information("Log cleanup process started.");
+
 
         }
 

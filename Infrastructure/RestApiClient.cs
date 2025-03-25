@@ -40,9 +40,9 @@ namespace PinquarkWMSSynchro.Infrastructure
             _logger = logger;
             _database = database;
         }
-        public Task<int> SendDocumentAsync(Document document) => PostAsync("documents", document);
-        public Task<int> SendProductAsync(Product product) => PostAsync("articles", product);
-        public Task<int> SendClientAsync(Client client) => PostAsync("contractors", client);
+        public Task<int> SendDocumentAsync(Document document) => PostAsync("documents", document, false);
+        public Task<int> SendProductsAsync(List<Product> products) => PostAsync("articles", products, true);
+        public Task<int> SendClientsAsync(List<Client> clients) => PostAsync("contractors", clients, true);
         private async Task<string> GetAuthTokenAsync()
         {
             if (!string.IsNullOrEmpty(_cachedToken) && DateTime.UtcNow < _tokenExpirationTime)
@@ -93,19 +93,25 @@ namespace PinquarkWMSSynchro.Infrastructure
             }
 
         }
-        private async Task<int> PostAsync<T>(string endpoint, T payload)
+        private async Task<int> PostAsync<T>(string endpoint, T payload, bool isList)
         {
             try
             {
                 using (HttpClient httpClient = new HttpClient())
                 {
+                    string fullEndpoint = endpoint;
+                    if (isList)
+                    {
+                        fullEndpoint += "/list";
+                    }
+
                     var authToken = await GetAuthTokenAsync();
 
                     var json = JsonConvert.SerializeObject(payload, _jsonSettings);
                     var content = new StringContent(json, Encoding.UTF8, "application/json");
-                    httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
 
-                    var response = await httpClient.PostAsync($"{_baseUrl}/{endpoint}", content);
+                    httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken);
+                    var response = await httpClient.PostAsync($"{_baseUrl}/{fullEndpoint}", content);
                     SavePayloadToFile(endpoint, json);
 
                     if (response.IsSuccessStatusCode)
@@ -115,7 +121,7 @@ namespace PinquarkWMSSynchro.Infrastructure
                     else
                     {
                         var errorResponse = await response.Content.ReadAsStringAsync();
-                        await LogToTable(payload, endpoint, 0, $"Failed to send {typeof(T).Name}. Response: {errorResponse}");
+                        await LogToTable(payload, endpoint.Replace("s", "").ToUpper(), 0, $"Failed to send {typeof(T).Name}. Response: {errorResponse}");
                         throw new Exception($"Failed to send {typeof(T).Name}. Response: {errorResponse}");
                     }
                 }
@@ -127,7 +133,7 @@ namespace PinquarkWMSSynchro.Infrastructure
                       typeof(T).Name,
                       JsonConvert.SerializeObject(payload, Formatting.None),
                       ex.Message);
-                throw;
+                return 0;
             }
         }
         public async Task GetFeedbackAsync(bool delete)
@@ -148,11 +154,15 @@ namespace PinquarkWMSSynchro.Infrastructure
                         var responseContent = await response.Content.ReadAsStringAsync();
                         var feedbackList = JsonConvert.DeserializeObject<List<Feedback>>(responseContent, _jsonSettings);
 
-                        SavePayloadToFile("feedback", responseContent, "feedback");
-                        foreach (Feedback feedback in feedbackList)
+                        if (feedbackList.Any())
                         {
-                            var feedbackJson = JsonConvert.SerializeObject(feedback, _jsonSettings);
-                            await LogToTable(feedback.Id, feedback.Entity, Convert.ToInt32(feedback.Success), feedback.Errors.FirstOrDefault().Value);
+                            SavePayloadToFile("feedback", responseContent, "feedback");
+
+                            foreach (Feedback feedback in feedbackList)
+                            {
+                                var feedbackJson = JsonConvert.SerializeObject(feedback, _jsonSettings);
+                                await LogToTable(feedback.Id, feedback.Entity, Convert.ToInt32(feedback.Success), feedback.Errors.FirstOrDefault().Value);
+                            }
                         }
                     }
                     else
@@ -180,30 +190,7 @@ namespace PinquarkWMSSynchro.Infrastructure
                 }
 
                 var timestamp = DateTime.UtcNow.ToString("yyyy_MM_dd_HH_mm_ss_fff");
-
-                JToken jsonToken = JToken.Parse(json);
-                string symbol = null;
-
-                if (jsonToken is JArray jsonArray && jsonArray.Count > 0)
-                {
-                    symbol = jsonArray[0]["symbol"]?.ToString();
-                }
-                else if (jsonToken is JObject jsonObject)
-                {
-                    symbol = jsonObject["symbol"]?.ToString();
-                }
-
-                string fileName;
-                if (!string.IsNullOrEmpty(symbol))
-                {
-                    symbol = SanitizeFileName(symbol);
-                    fileName = $"{symbol}_{timestamp:yyyy_MM_dd_HH_mm_ss_fff}.json";
-                }
-                else
-                {
-                    fileName = $"{endpoint}_{timestamp:yyyy_MM_dd_HH_mm_ss_fff}.json";
-                }
-
+                string fileName = $"{endpoint}_{timestamp:yyyy_MM_dd_HH_mm_ss_fff}.json";
                 var filePath = Path.Combine(logsDirectory, fileName);
 
                 File.WriteAllText(filePath, json);
@@ -221,23 +208,52 @@ namespace PinquarkWMSSynchro.Infrastructure
 
         private async Task LogToTable(object obj, string endpoint, int success, string error = "")
         {
+            string status;
+
             if (obj is Document document)
             {
                 await _database.LogToTable(document.ErpId, document.ErpType, endpoint, success, error);
+                status = success == 1 ? "Zsynchronizowano" : "Błąd synchronizacji";
+
+                int result = await _database.UpdateAttribute(document.ErpId, document.ErpType, "StatusWMS", status);
+                if (result != 0)
+                {
+                    _logger.Error("Error while updating attribute StatusWMS for Document: " + result.ToString());
+                }
             }
-            else if (obj is Product product)
+            else if (obj is List<Product> products)
             {
-                await _database.LogToTable(product.ErpId, 16, endpoint, success, error);
+                var tasks = products.Select(async p =>
+                {
+                    await _database.LogToTable(p.ErpId, 16, endpoint, success, error);
+                    string productStatus = success == 1 ? "Zsynchronizowano" : "Błąd synchronizacji";
+                    int result = await _database.UpdateAttribute(p.ErpId, 16, "StatusWMS", productStatus);
+                    if (result != 0)
+                    {
+                        _logger.Error($"Error while updating attribute StatusWMS for Product {p.ErpId}: " + result.ToString());
+                    }
+                });
+                await Task.WhenAll(tasks);
             }
-            else if (obj is Client client)
+            else if (obj is List<Client> clients)
             {
-                await _database.LogToTable(client.ErpId, 32, endpoint, success, error);
+                var tasks = clients.Select(async client =>
+                {
+                    await _database.LogToTable(client.ErpId, 32, endpoint, success, error);
+                    string clientStatus = success == 1 ? "Zsynchronizowano" : "Błąd synchronizacji";
+                    int result = await _database.UpdateAttribute(client.ErpId, 32, "StatusWMS", clientStatus);
+                    if (result != 0)
+                    {
+                        _logger.Error($"Error while updating attribute StatusWMS for Client {client.ErpId}: " + result.ToString());
+                    }
+                });
+                await Task.WhenAll(tasks);
             }
             else
             {
                 int type;
                 int id;
-                string status;
+
                 switch (endpoint)
                 {
                     case "ARTICLE":
@@ -249,25 +265,23 @@ namespace PinquarkWMSSynchro.Infrastructure
                         type = 32;
                         break;
                     case "DOCUMENT":
-                        id = Convert.ToInt32(obj.ToString().Split('|')[1]);
-                        type = Convert.ToInt32(obj.ToString().Split('|')[0]);
+                        id = Convert.ToInt32(obj.ToString().Split('|')[0]);
+                        type = Convert.ToInt32(obj.ToString().Split('|')[1]);
                         break;
                     default:
                         id = Convert.ToInt32(obj);
                         type = 0;
                         break;
                 }
-                if (success == 1)
-                    status = "Zsynchronizowano";
-                else
-                    status = "Błąd synchronizacji";
 
+                status = success == 1 ? "Zsynchronizowano" : "Błąd synchronizacji";
 
                 int result = await _database.UpdateAttribute(id, type, "StatusWMS", status);
                 if (result != 0)
                 {
-                    _logger.Error("Error while updating attribute StatusWMS: " + result.ToString());
+                    _logger.Error($"Error while updating attribute StatusWMS for ID {id}: " + result.ToString());
                 }
+
                 await _database.LogToTable(id, type, endpoint, success, error);
             }
         }

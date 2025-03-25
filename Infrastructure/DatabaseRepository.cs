@@ -38,6 +38,7 @@ namespace PinquarkWMSSynchro
                     {
                         List<Task<int>> updateTasks = new List<Task<int>>();
                         List<Task<List<DocumentPosition>>> positionTasks = new List<Task<List<DocumentPosition>>>();
+                        List<Task<List<Models.Attribute>>> attributeTasks = new List<Task<List<Models.Attribute>>>();
 
                         while (await reader.ReadAsync().ConfigureAwait(false))
                         {
@@ -46,11 +47,13 @@ namespace PinquarkWMSSynchro
 
                             updateTasks.Add(UpdateAttribute(trnNumer, trnTyp, "StatusWMS", "Przetwarzane"));
                             positionTasks.Add(GetDocumentElementsAsync(trnNumer, trnTyp));
+                            attributeTasks.Add(GetDocumentAttributesAsync(trnNumer, trnTyp));
 
                             Document document = new Document()
                             {
                                 ErpId = trnNumer,
-                                ErpIdTxt = reader["TrnTyp"].ToString() + "|" + reader["TrnNumer"].ToString(),
+                                ErpIdTxt = trnNumer + "|" + trnTyp,
+                                ErpType = trnTyp,
                                 DocumentType = reader["DokumentTyp"].ToString(),
                                 ErpCode = reader["PelnaNazwa"].ToString(),
                                 ErpStatusSymbol = reader["Status"].ToString(),
@@ -92,9 +95,12 @@ namespace PinquarkWMSSynchro
 
                         await Task.WhenAll(updateTasks).ConfigureAwait(false);
                         var positionResults = await Task.WhenAll(positionTasks).ConfigureAwait(false);
+                        var attributeResults = await Task.WhenAll(attributeTasks).ConfigureAwait(false);
+
                         for (int i = 0; i < documents.Count; i++)
                         {
                             documents[i].Positions = positionResults[i];
+                            documents[i].Attributes = attributeResults[i];
                         }
                     }
                 }
@@ -143,6 +149,65 @@ namespace PinquarkWMSSynchro
 
                 return positions;
             }
+        }
+
+        private async Task<List<Models.Attribute>> GetDocumentAttributesAsync(int prodcuctId, int productType)
+        {
+            List<Models.Attribute> attributes = new List<Models.Attribute>();
+            string procedureName = "kkur.WMSPobierzAtrybutyDokumentu";
+
+            using (SqlConnection connection = new SqlConnection(_connectionString))
+            {
+                await connection.OpenAsync();
+                using (SqlCommand command = new SqlCommand(procedureName, connection))
+                {
+                    command.CommandType = CommandType.StoredProcedure;
+                    command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
+                    command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
+
+                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            Models.Attribute attribute = new Models.Attribute()
+                            {
+                                Symbol = reader["Klasa"].ToString(),
+                                Type = reader["Typ"].ToString(),
+                            };
+
+                            switch (attribute.Type.ToLower())
+                            {
+                                case "date":
+                                    attribute.ValueDate = reader["Wartosc"].ToString();
+                                    break;
+                                case "datetime":
+                                    if (DateTime.TryParse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dateTimeValue))
+                                    {
+                                        attribute.ValueDate = dateTimeValue.ToString("yyyy-MM-dd"); // Extract date part
+                                        attribute.ValueTime = dateTimeValue.ToString("HH:mm:ss");   // Extract time part
+                                    }
+                                    else
+                                    {
+                                        throw new Exception($"Invalid datetime format: {reader["Wartosc"]}");
+                                    }
+                                    break;
+                                case "decimal":
+                                    attribute.ValueDecimal = Decimal.Parse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture);
+                                    break;
+                                case "text":
+                                    attribute.ValueText = reader["Wartosc"].ToString();
+                                    break;
+                                default:
+                                    throw new Exception($"Unknown type: {attribute.Type}");
+                            }
+
+
+                            attributes.Add(attribute);
+                        }
+                    }
+                }
+            }
+            return attributes;
         }
 
         public async Task<List<Product>> GetProductsAsync()
@@ -333,6 +398,17 @@ namespace PinquarkWMSSynchro
                                 case "date":
                                     attribute.ValueDate = reader["Wartosc"].ToString();
                                     break;
+                                case "datetime":
+                                    if (DateTime.TryParse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dateTimeValue))
+                                    {
+                                        attribute.ValueDate = dateTimeValue.ToString("yyyy-MM-dd");
+                                        attribute.ValueTime = dateTimeValue.ToString("HH:mm:ss");
+                                    }
+                                    else
+                                    {
+                                        throw new Exception($"Invalid datetime format: {reader["Wartosc"]}");
+                                    }
+                                    break;
                                 case "decimal":
                                     attribute.ValueDecimal = Decimal.Parse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture);
                                     break;
@@ -448,17 +524,22 @@ namespace PinquarkWMSSynchro
                                 case "date":
                                     attribute.ValueDate = reader["Wartosc"].ToString();
                                     break;
-                                case "decimal":
-                                    attribute.ValueDecimal = reader["Wartosc"] != DBNull.Value ? Convert.ToDecimal(reader["Wartosc"]) : 0;
+                                case "datetime":
+                                    if (DateTime.TryParse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dateTimeValue))
+                                    {
+                                        attribute.ValueDate = dateTimeValue.ToString("yyyy-MM-dd"); // Extract date part
+                                        attribute.ValueTime = dateTimeValue.ToString("HH:mm:ss");   // Extract time part
+                                    }
+                                    else
+                                    {
+                                        throw new Exception($"Invalid datetime format: {reader["Wartosc"]}");
+                                    }
                                     break;
-                                case "int":
-                                    attribute.ValueInt = reader["Wartosc"].ToString();
+                                case "decimal":
+                                    attribute.ValueDecimal = Decimal.Parse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture);
                                     break;
                                 case "text":
                                     attribute.ValueText = reader["Wartosc"].ToString();
-                                    break;
-                                case "time":
-                                    attribute.ValueTime = reader["Wartosc"].ToString();
                                     break;
                                 default:
                                     throw new Exception($"Unknown type: {attribute.Type}");

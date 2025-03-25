@@ -17,13 +17,15 @@ namespace PinquarkWMSSynchro.Processing
         private readonly RestApiClient _apiClient;
         private readonly ILogger _logger;
         private readonly int _fetchInterval;
+        private readonly int _batchSizePerRequest;
 
-        public DocumentProcessor(DatabaseRepository databaseRepository, RestApiClient apiClient, ILogger logger)
+        public DocumentProcessor(DatabaseRepository database, RestApiClient apiClient, ILogger logger, int batchSizePerRequest)
         {
-            _database = databaseRepository;
+            _database = database;
             _apiClient = apiClient;
             _logger = logger;
             _fetchInterval = Convert.ToInt32(ConfigurationManager.AppSettings["Co ile minut pobierac dokumenty"]);
+            _batchSizePerRequest = batchSizePerRequest;
         }
 
         public async Task StartProcessingAsync(CancellationToken cancellationToken)
@@ -48,7 +50,7 @@ namespace PinquarkWMSSynchro.Processing
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error(ex, "Error while fetching or processing products.");
+                    _logger.Error(ex, "Error while fetching or processing documents.");
                 }
 
                 try
@@ -63,8 +65,6 @@ namespace PinquarkWMSSynchro.Processing
         {
             try
             {
-                _logger.Information($"Processing document {document.ErpCode} ({document.ErpId})");
-
                 var result = await _apiClient.SendDocumentAsync(document);
 
                 if (result == 1)
