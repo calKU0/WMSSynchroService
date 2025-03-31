@@ -1,6 +1,7 @@
 ﻿using Microsoft.Data.SqlClient;
 using PinquarkWMSSynchro.Infrastructure;
 using PinquarkWMSSynchro.Models;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -8,6 +9,7 @@ using System.Globalization;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
@@ -17,10 +19,13 @@ namespace PinquarkWMSSynchro
     {
         private readonly string _connectionString;
         private readonly XlApiService _xlApiService;
-        public DatabaseRepository(string connectionString, XlApiService xlApiService)
+        private readonly ILogger _logger;
+
+        public DatabaseRepository(string connectionString, XlApiService xlApiService, ILogger logger)
         {
             _connectionString = connectionString;
             _xlApiService = xlApiService;
+            _logger = logger;
         }
 
         public async Task<List<Document>> GetDocumentsAsync()
@@ -49,48 +54,56 @@ namespace PinquarkWMSSynchro
                             positionTasks.Add(GetDocumentElementsAsync(trnNumer, trnTyp));
                             attributeTasks.Add(GetDocumentAttributesAsync(trnNumer, trnTyp));
 
-                            Document document = new Document()
+                            try
                             {
-                                ErpId = trnNumer,
-                                ErpIdTxt = trnNumer + "|" + trnTyp,
-                                ErpType = trnTyp,
-                                DocumentType = reader["DokumentTyp"].ToString(),
-                                ErpCode = reader["PelnaNazwa"].ToString(),
-                                ErpStatusSymbol = reader["Status"].ToString(),
-                                OwnCode = reader["PelnaNazwa"].ToString(),
-                                InputDocumentNumber = reader["PelnaNazwa"].ToString(),
-                                Source = "ERP",
-                                Symbol = reader["Kod"].ToString(),
-                                Date = reader["Data"].ToString(),
-                                Note = reader["Opis"].ToString(),
-                                DeliveryMethodSymbol = reader["SposobDostawy"].ToString(),
-                                Priority = Convert.ToInt32(reader["Priorytet"] == DBNull.Value ? null : reader["Priorytet"]),
-                                WarehouseSymbol = reader["Magazyn"].ToString(),
-                                ReciepentId = Convert.ToInt32(reader["KntNumerOdbiorcy"]),
-                                ReciepentSource = "ERP",
-
-                                Contractor = new DocumentClient()
+                                Document document = new Document()
                                 {
-                                    ErpId = Convert.ToInt32(reader["KntNumer"]),
-                                    Source = "ERP"
-                                },
+                                    ErpId = trnNumer,
+                                    ErpIdTxt = trnNumer + "|" + trnTyp,
+                                    ErpType = trnTyp,
+                                    DocumentType = reader["DokumentTyp"].ToString(),
+                                    ErpCode = reader["PelnaNazwa"].ToString(),
+                                    ErpStatusSymbol = reader["Status"].ToString(),
+                                    OwnCode = reader["PelnaNazwa"].ToString(),
+                                    InputDocumentNumber = reader["PelnaNazwa"].ToString(),
+                                    Source = "ERP",
+                                    Symbol = reader["Kod"].ToString(),
+                                    Date = reader["Data"].ToString(),
+                                    Note = reader["Opis"].ToString(),
+                                    DeliveryMethodSymbol = reader["SposobDostawy"].ToString(),
+                                    Priority = Convert.ToInt32(reader["Priorytet"] == DBNull.Value ? null : reader["Priorytet"]),
+                                    WarehouseSymbol = reader["Magazyn"].ToString(),
+                                    ReciepentId = Convert.ToInt32(reader["KntNumerOdbiorcy"]),
+                                    ReciepentSource = "ERP",
 
-                                DeliveryAddress = new ClientAddress()
-                                {
-                                    Active = true,
-                                    ContractorId = Convert.ToInt32(reader["KntNumer"]),
-                                    ContractorSource = "ERP",
-                                    Code = reader["KodPocztowy"].ToString(),
-                                    Name = reader["AdresNazwa"].ToString(),
-                                    PostCity = reader["Miasto"].ToString(),
-                                    City = reader["Miasto"].ToString(),
-                                    Street = reader["Ulica"].ToString(),
-                                    Country = reader["Kraj"].ToString(),
-                                    DateFrom = reader["DataOd"].ToString(),
-                                }
-                            };
+                                    Contractor = new DocumentClient()
+                                    {
+                                        ErpId = Convert.ToInt32(reader["KntNumer"]),
+                                        Source = "ERP"
+                                    },
 
-                            documents.Add(document);
+                                    DeliveryAddress = new ClientAddress()
+                                    {
+                                        Active = true,
+                                        ContractorId = Convert.ToInt32(reader["KntNumer"]),
+                                        ContractorSource = "ERP",
+                                        Code = reader["KodPocztowy"].ToString(),
+                                        Name = reader["AdresNazwa"].ToString(),
+                                        PostCity = reader["Miasto"].ToString(),
+                                        City = reader["Miasto"].ToString(),
+                                        Street = reader["Ulica"].ToString(),
+                                        Country = reader["Kraj"].ToString(),
+                                        DateFrom = reader["DataOd"].ToString(),
+                                    }
+                                };
+
+                                documents.Add(document);
+                            }
+                            catch (Exception ex)
+                            {
+                                await LogToTable(trnNumer, trnTyp, "DOCUMENT", 0, ex.Message);
+                                _logger.Error(ex, "Error while fetching document from database");
+                            }
                         }
 
                         await Task.WhenAll(updateTasks).ConfigureAwait(false);
@@ -177,6 +190,9 @@ namespace PinquarkWMSSynchro
 
                             switch (attribute.Type.ToLower())
                             {
+                                case "integer":
+                                    attribute.ValueInt = Convert.ToInt32(reader["Wartosc"]);
+                                    break;
                                 case "date":
                                     attribute.ValueDate = reader["Wartosc"].ToString();
                                     break;
@@ -237,23 +253,31 @@ namespace PinquarkWMSSynchro
                             var providersTask = GetProductProvidersAsync(productId, productType);
                             var unitsTask = GetProductUnitsAsync(productId, productType);
                             var attributesTask = GetProcuctAttributesAsync(productId, productType);
-
-                            Product product = new Product()
+                            try
                             {
-                                ErpId = productId,
-                                Name = reader["Nazwa"].ToString(),
-                                Source = "ERP",
-                                Symbol = reader["Kod"].ToString(),
-                                Unit = reader["Jm"].ToString(),
-                                Group = reader["Grupa"].ToString(),
+                                Product product = new Product()
+                                {
+                                    ErpId = productId,
+                                    Name = reader["Nazwa"].ToString(),
+                                    Source = "ERP",
+                                    Symbol = reader["Kod"].ToString(),
+                                    Unit = reader["Jm"].ToString(),
+                                    Group = reader["Grupa"].ToString(),
 
-                                Images = await imagesTask.ConfigureAwait(false),
-                                Providers = await providersTask.ConfigureAwait(false),
-                                UnitsOfMeasure = await unitsTask.ConfigureAwait(false),
-                                Attributes = await attributesTask.ConfigureAwait(false)
-                            };
+                                    Images = await imagesTask.ConfigureAwait(false),
+                                    Providers = await providersTask.ConfigureAwait(false),
+                                    UnitsOfMeasure = await unitsTask.ConfigureAwait(false),
+                                    Attributes = await attributesTask.ConfigureAwait(false)
+                                };
 
-                            products.Add(product);
+
+                                products.Add(product);
+                            }
+                            catch (Exception ex)
+                            {
+                                await LogToTable(productId, productType, "ARTICLE", 0, ex.Message);
+                                _logger.Error(ex, "Error while fetching product from database");
+                            }
                         }
 
                         await Task.WhenAll(updateTasks).ConfigureAwait(false);
@@ -395,6 +419,9 @@ namespace PinquarkWMSSynchro
 
                             switch (attribute.Type.ToLower())
                             {
+                                case "integer":
+                                    attribute.ValueInt = Convert.ToInt32(reader["Wartosc"]);
+                                    break;
                                 case "date":
                                     attribute.ValueDate = reader["Wartosc"].ToString();
                                     break;
@@ -410,7 +437,14 @@ namespace PinquarkWMSSynchro
                                     }
                                     break;
                                 case "decimal":
-                                    attribute.ValueDecimal = Decimal.Parse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture);
+                                    if (Decimal.TryParse(reader["Wartosc"].ToString(), NumberStyles.Any, new CultureInfo("en-US"), out Decimal value))
+                                    {
+                                        attribute.ValueDecimal = value;
+                                    }
+                                    else
+                                    {
+                                        throw new Exception($"Invalid decimal format: {reader["Wartosc"]}");
+                                    }
                                     break;
                                 case "text":
                                     attribute.ValueText = reader["Wartosc"].ToString();
@@ -452,38 +486,47 @@ namespace PinquarkWMSSynchro
 
                             var attributesTask = GetClientAttributesAsync(clientId, clientType);
                             var addressesTask = GetClientAddressesAsync(clientId, clientType);
-
-                            Client client = new Client()
+                            try
                             {
-                                ErpId = clientId,
-                                Symbol = reader["Akronim"].ToString(),
-                                Name = reader["Nazwa"].ToString(),
-                                Source = "ERP",
-                                Email = reader["Email"].ToString(),
-                                Phone = reader["Telefon"].ToString(),
-                                IsSupplier = Convert.ToBoolean(Convert.ToInt32(reader["Dostawca"])),
-                                TaxNumber = reader["NIP"].ToString(),
-                                Description = reader["Opis"].ToString(),
 
-                                Address = new ClientAddress()
+
+                                Client client = new Client()
                                 {
-                                    Active = true,
-                                    ContractorId = clientId,
-                                    Code = reader["Akronim"].ToString(),
-                                    ContractorSource = "ERP",
+                                    ErpId = clientId,
+                                    Symbol = reader["Akronim"].ToString(),
                                     Name = reader["Nazwa"].ToString(),
-                                    PostCity = reader["KodPocztowy"].ToString(),
-                                    City = reader["Miasto"].ToString(),
-                                    Street = reader["Ulica"].ToString(),
-                                    Country = reader["Kraj"].ToString(),
-                                },
+                                    Source = "ERP",
+                                    Email = reader["Email"].ToString(),
+                                    Phone = reader["Telefon"].ToString(),
+                                    IsSupplier = Convert.ToBoolean(Convert.ToInt32(reader["Dostawca"])),
+                                    TaxNumber = reader["NIP"].ToString(),
+                                    Description = reader["Opis"].ToString(),
 
-                                // Await both tasks in parallel
-                                Attributes = await attributesTask.ConfigureAwait(false),
-                                Addresses = await addressesTask.ConfigureAwait(false),
-                            };
+                                    Address = new ClientAddress()
+                                    {
+                                        Active = true,
+                                        ContractorId = clientId,
+                                        Code = reader["Akronim"].ToString(),
+                                        ContractorSource = "ERP",
+                                        Name = reader["Nazwa"].ToString(),
+                                        PostCity = reader["KodPocztowy"].ToString(),
+                                        City = reader["Miasto"].ToString(),
+                                        Street = reader["Ulica"].ToString(),
+                                        Country = reader["Kraj"].ToString(),
+                                    },
 
-                            clients.Add(client);
+                                    // Await both tasks in parallel
+                                    Attributes = await attributesTask.ConfigureAwait(false),
+                                    Addresses = await addressesTask.ConfigureAwait(false),
+                                };
+
+                                clients.Add(client);
+                            }
+                            catch (Exception ex)
+                            {
+                                await LogToTable(clientId, clientType, "CONTRACTOR", 0, ex.Message);
+                                _logger.Error(ex, "Error while fetching client from database");
+                            }
                         }
 
                         // Ensure all updates are completed before proceeding
@@ -521,6 +564,9 @@ namespace PinquarkWMSSynchro
 
                             switch (attribute.Type.ToLower())
                             {
+                                case "integer":
+                                    attribute.ValueInt = Convert.ToInt32(reader["Wartosc"]);
+                                    break;
                                 case "date":
                                     attribute.ValueDate = reader["Wartosc"].ToString();
                                     break;
@@ -536,7 +582,14 @@ namespace PinquarkWMSSynchro
                                     }
                                     break;
                                 case "decimal":
-                                    attribute.ValueDecimal = Decimal.Parse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture);
+                                    if (Decimal.TryParse(reader["Wartosc"].ToString(), NumberStyles.Any, new CultureInfo("en-US"), out Decimal value))
+                                    {
+                                        attribute.ValueDecimal = value;
+                                    }
+                                    else
+                                    {
+                                        throw new Exception($"Invalid decimal format: {reader["Wartosc"]}");
+                                    }
                                     break;
                                 case "text":
                                     attribute.ValueText = reader["Wartosc"].ToString();

@@ -34,7 +34,7 @@ namespace PinquarkWMSSynchro
             try
             {
                 _xlApiService = new XlApiService();
-                _database = new DatabaseRepository(_sqlConnectionString, _xlApiService);
+                _database = new DatabaseRepository(_sqlConnectionString, _xlApiService, _logger);
                 _restApiClient = new RestApiClient(_database, _logger);
                 _documentProcessor = new DocumentProcessor(_database, _restApiClient, _logger, _batchSizePerRequest);
                 _productProcessor = new ProductProcessor(_database, _restApiClient, _logger, _batchSizePerRequest);

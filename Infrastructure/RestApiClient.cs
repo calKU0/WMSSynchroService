@@ -27,7 +27,7 @@ namespace PinquarkWMSSynchro.Infrastructure
         private readonly JsonSerializerSettings _jsonSettings = new JsonSerializerSettings
         {
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
-            Formatting = Formatting.Indented
+            Formatting = Formatting.Indented,
         };
         private readonly DatabaseRepository _database;
 

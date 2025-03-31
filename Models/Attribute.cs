@@ -13,7 +13,7 @@ namespace PinquarkWMSSynchro.Models
         public string ValueDate { get; set; }
         public string ValueDateTo { get; set; }
         public decimal ValueDecimal { get; set; }
-        public string ValueInt { get; set; }
+        public int ValueInt { get; set; }
         public string ValueText { get; set; }
         public string ValueTime { get; set; }
     }
