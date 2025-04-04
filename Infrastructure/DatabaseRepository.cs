@@ -146,6 +146,7 @@ namespace PinquarkWMSSynchro
                                 Quantity = Convert.ToInt32(reader["Ilosc"]),
                                 StatusSymbol = reader["Status"].ToString(),
                                 No = Convert.ToInt32(reader["Lp"]),
+                                Note = reader["Opis"].ToString(),
                                 Article = new DocumentElement()
                                 {
                                     ErpId = Convert.ToInt32(reader["TwrNumer"]),
