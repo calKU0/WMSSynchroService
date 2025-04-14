@@ -79,6 +79,10 @@ namespace PinquarkWMSSynchro.Processing
                     _logger.Warning($"Failed to send batch of {batch.Count} clients to API.");
                 }
             }
+            catch (ProcessingException)
+            {
+                // It is already logged so I dont need to log it again
+            }
             catch (Exception ex)
             {
                 _logger.Error(ex, $"Error processing batch of {batch.Count} clients.");

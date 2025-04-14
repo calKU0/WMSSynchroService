@@ -51,6 +51,10 @@ namespace PinquarkWMSSynchro.Processing
                         _logger.Information("No products found to process.");
                     }
                 }
+                catch (ProcessingException)
+                {
+                    // It is already logged so I dont need to log it again
+                }
                 catch (Exception ex)
                 {
                     _logger.Error(ex, "Error while fetching or processing products.");

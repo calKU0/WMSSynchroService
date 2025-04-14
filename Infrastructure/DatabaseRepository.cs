@@ -11,6 +11,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Windows.Interop;
 using System.Xml.Linq;
 
 namespace PinquarkWMSSynchro
@@ -50,12 +51,12 @@ namespace PinquarkWMSSynchro
                             int trnNumer = Convert.ToInt32(reader["TrnNumer"]);
                             int trnTyp = Convert.ToInt32(reader["TrnTyp"]);
 
-                            updateTasks.Add(UpdateAttribute(trnNumer, trnTyp, "StatusWMS", "Przetwarzane"));
-                            positionTasks.Add(GetDocumentElementsAsync(trnNumer, trnTyp));
-                            attributeTasks.Add(GetDocumentAttributesAsync(trnNumer, trnTyp));
-
                             try
                             {
+                                updateTasks.Add(UpdateAttribute(trnNumer, trnTyp, "StatusWMS", "Przetwarzane"));
+                                positionTasks.Add(GetDocumentElementsAsync(trnNumer, trnTyp));
+                                attributeTasks.Add(GetDocumentAttributesAsync(trnNumer, trnTyp));
+
                                 Document document = new Document()
                                 {
                                     ErpId = trnNumer,
@@ -101,7 +102,13 @@ namespace PinquarkWMSSynchro
                             }
                             catch (Exception ex)
                             {
-                                await LogToTable(trnNumer, trnTyp, "DOCUMENT", 0, ex.Message);
+                                await LogToTable(trnNumer, trnTyp, "DOCUMENT", 0, "Error while fetching document from database. Error Message:" + ex.Message);
+                                int resultUpdate = await UpdateAttribute(trnNumer, trnTyp, "StatusWMS", "Błąd synchronizacji");
+                                if (resultUpdate != 0)
+                                {
+                                    _logger.Error("Error while updating attribute StatusWMS for document: " + resultUpdate.ToString());
+                                }
+
                                 _logger.Error(ex, "Error while fetching document from database");
                             }
                         }
@@ -125,104 +132,134 @@ namespace PinquarkWMSSynchro
         public async Task<List<DocumentPosition>> GetDocumentElementsAsync(int documentId, int documentType)
         {
             List<DocumentPosition> positions = new List<DocumentPosition>();
-            string procedureName = "kkur.WMSPobierzElementyDokumentu";
-
-            using (SqlConnection connection = new SqlConnection(_connectionString))
+            try
             {
-                await connection.OpenAsync();
-                using (SqlCommand command = new SqlCommand(procedureName, connection))
-                {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = documentId;
-                    command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = documentType;
+                string procedureName = "kkur.WMSPobierzElementyDokumentu";
 
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                using (SqlConnection connection = new SqlConnection(_connectionString))
+                {
+                    await connection.OpenAsync();
+                    using (SqlCommand command = new SqlCommand(procedureName, connection))
                     {
-                        while (await reader.ReadAsync())
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = documentId;
+                        command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = documentType;
+
+                        using (SqlDataReader reader = await command.ExecuteReaderAsync())
                         {
-                            DocumentPosition position = new DocumentPosition()
+                            while (await reader.ReadAsync())
                             {
-                                ErpId = Convert.ToInt32(reader["TwrNumer"]),
-                                Quantity = Convert.ToInt32(reader["Ilosc"]),
-                                StatusSymbol = reader["Status"].ToString(),
-                                No = Convert.ToInt32(reader["Lp"]),
-                                Note = reader["Opis"].ToString(),
-                                Article = new DocumentElement()
+                                DocumentPosition position = new DocumentPosition()
                                 {
                                     ErpId = Convert.ToInt32(reader["TwrNumer"]),
-                                    Source = "ERP",
-                                    Unit = reader["Jm"].ToString()
-                                }
+                                    Quantity = Convert.ToInt32(reader["Ilosc"]),
+                                    StatusSymbol = reader["Status"].ToString(),
+                                    No = Convert.ToInt32(reader["Lp"]),
+                                    Note = reader["Opis"].ToString(),
+                                    Article = new DocumentElement()
+                                    {
+                                        ErpId = Convert.ToInt32(reader["TwrNumer"]),
+                                        Source = "ERP",
+                                        Unit = reader["Jm"].ToString()
+                                    }
 
-                            };
+                                };
 
-                            positions.Add(position);
+                                positions.Add(position);
+                            }
                         }
                     }
                 }
-
-                return positions;
             }
+            catch (Exception ex)
+            {
+                await LogToTable(documentId, documentType, "DOCUMENT", 0, "Error while fetching document elements from database. Error Message:" + ex.Message);
+                int resultUpdate = await UpdateAttribute(documentId, documentType, "StatusWMS", "Błąd synchronizacji");
+                if (resultUpdate != 0)
+                {
+                    _logger.Error("Error while updating attribute StatusWMS for document: " + resultUpdate.ToString());
+                }
+
+                _logger.Error(ex, "Error while fetching document elements from database");
+                throw new ProcessingException();
+            }
+
+            return positions;
         }
 
         private async Task<List<Models.Attribute>> GetDocumentAttributesAsync(int prodcuctId, int productType)
         {
             List<Models.Attribute> attributes = new List<Models.Attribute>();
-            string procedureName = "kkur.WMSPobierzAtrybutyDokumentu";
-
-            using (SqlConnection connection = new SqlConnection(_connectionString))
+            try
             {
-                await connection.OpenAsync();
-                using (SqlCommand command = new SqlCommand(procedureName, connection))
+                string procedureName = "kkur.WMSPobierzAtrybutyDokumentu";
+
+                using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
-                    command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
-
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    await connection.OpenAsync();
+                    using (SqlCommand command = new SqlCommand(procedureName, connection))
                     {
-                        while (await reader.ReadAsync())
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
+                        command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
+
+                        using (SqlDataReader reader = await command.ExecuteReaderAsync())
                         {
-                            Models.Attribute attribute = new Models.Attribute()
+                            while (await reader.ReadAsync())
                             {
-                                Symbol = reader["Klasa"].ToString(),
-                                Type = reader["Typ"].ToString(),
-                            };
+                                Models.Attribute attribute = new Models.Attribute()
+                                {
+                                    Symbol = reader["Klasa"].ToString(),
+                                    Type = reader["Typ"].ToString(),
+                                };
 
-                            switch (attribute.Type.ToLower())
-                            {
-                                case "integer":
-                                    attribute.ValueInt = Convert.ToInt32(reader["Wartosc"]);
-                                    break;
-                                case "date":
-                                    attribute.ValueDate = reader["Wartosc"].ToString();
-                                    break;
-                                case "datetime":
-                                    if (DateTime.TryParse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dateTimeValue))
-                                    {
-                                        attribute.ValueDate = dateTimeValue.ToString("yyyy-MM-dd"); // Extract date part
-                                        attribute.ValueTime = dateTimeValue.ToString("HH:mm:ss");   // Extract time part
-                                    }
-                                    else
-                                    {
-                                        throw new Exception($"Invalid datetime format: {reader["Wartosc"]}");
-                                    }
-                                    break;
-                                case "decimal":
-                                    attribute.ValueDecimal = Decimal.Parse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture);
-                                    break;
-                                case "text":
-                                    attribute.ValueText = reader["Wartosc"].ToString();
-                                    break;
-                                default:
-                                    throw new Exception($"Unknown type: {attribute.Type}");
+                                switch (attribute.Type.ToLower())
+                                {
+                                    case "integer":
+                                        attribute.ValueInt = Convert.ToInt32(reader["Wartosc"]);
+                                        break;
+                                    case "date":
+                                        attribute.ValueDate = reader["Wartosc"].ToString();
+                                        break;
+                                    case "datetime":
+                                        if (DateTime.TryParse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dateTimeValue))
+                                        {
+                                            attribute.ValueDate = dateTimeValue.ToString("yyyy-MM-dd"); // Extract date part
+                                            attribute.ValueTime = dateTimeValue.ToString("HH:mm:ss");   // Extract time part
+                                        }
+                                        else
+                                        {
+                                            throw new Exception($"Invalid datetime format: {reader["Wartosc"]}");
+                                        }
+                                        break;
+                                    case "decimal":
+                                        attribute.ValueDecimal = Decimal.Parse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture);
+                                        break;
+                                    case "text":
+                                        attribute.ValueText = reader["Wartosc"].ToString();
+                                        break;
+                                    default:
+                                        throw new Exception($"Unknown type: {attribute.Type}");
+                                }
+
+
+                                attributes.Add(attribute);
                             }
-
-
-                            attributes.Add(attribute);
                         }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                await LogToTable(prodcuctId, productType, "DOCUMENT", 0, "Error while fetching document attributes from database. Error Message: " + ex.Message);
+                int resultUpdate = await UpdateAttribute(prodcuctId, productType, "StatusWMS", "Błąd synchronizacji");
+                if (resultUpdate != 0)
+                {
+                    _logger.Error("Error while updating attribute StatusWMS for document: " + resultUpdate.ToString());
+                }
+
+                _logger.Error(ex, "Error while fetching document attributes from database");
+                throw new ProcessingException();
             }
             return attributes;
         }
@@ -249,13 +286,14 @@ namespace PinquarkWMSSynchro
 
                             updateTasks.Add(UpdateAttribute(productId, productType, "StatusWMS", "Przetwarzane"));
 
-                            // Fetch product-related data in parallel
-                            var imagesTask = GetProductImagesAsync(productId, productType);
-                            var providersTask = GetProductProvidersAsync(productId, productType);
-                            var unitsTask = GetProductUnitsAsync(productId, productType);
-                            var attributesTask = GetProcuctAttributesAsync(productId, productType);
                             try
                             {
+                                // Fetch product-related data in parallel
+                                var imagesTask = GetProductImagesAsync(productId, productType);
+                                var providersTask = GetProductProvidersAsync(productId, productType);
+                                var unitsTask = GetProductUnitsAsync(productId, productType);
+                                var attributesTask = GetProcuctAttributesAsync(productId, productType);
+
                                 Product product = new Product()
                                 {
                                     ErpId = productId,
@@ -271,12 +309,16 @@ namespace PinquarkWMSSynchro
                                     Attributes = await attributesTask.ConfigureAwait(false)
                                 };
 
-
                                 products.Add(product);
                             }
                             catch (Exception ex)
                             {
-                                await LogToTable(productId, productType, "ARTICLE", 0, ex.Message);
+                                await LogToTable(productId, productType, "ARTICLE", 0, "Error while fetching product from database. Error Message: " + ex.Message);
+                                int resultUpdate = await UpdateAttribute(productId, productType, "StatusWMS", "Błąd synchronizacji");
+                                if (resultUpdate != 0)
+                                {
+                                    _logger.Error("Error while updating attribute StatusWMS for product: " + resultUpdate.ToString());
+                                }
                                 _logger.Error(ex, "Error while fetching product from database");
                             }
                         }
@@ -291,67 +333,97 @@ namespace PinquarkWMSSynchro
         private async Task<List<Image>> GetProductImagesAsync(int prodcuctId, int productType)
         {
             List<Image> images = new List<Image>();
-            string procedureName = "kkur.WMSPobierzZdjeciaTowaru";
-
-            using (SqlConnection connection = new SqlConnection(_connectionString))
+            try
             {
-                await connection.OpenAsync();
-                using (SqlCommand command = new SqlCommand(procedureName, connection))
+                string procedureName = "kkur.WMSPobierzZdjeciaTowaru";
+
+                using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
-                    command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
-
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    await connection.OpenAsync();
+                    using (SqlCommand command = new SqlCommand(procedureName, connection))
                     {
-                        while (await reader.ReadAsync())
-                        {
-                            Image image = new Image()
-                            {
-                                Default = Convert.ToBoolean((int)reader["Default"]),
-                                Path = reader["Path"].ToString(),
-                                CreatedDate = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-                            };
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
+                        command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
 
-                            images.Add(image);
+                        using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                        {
+                            while (await reader.ReadAsync())
+                            {
+                                Image image = new Image()
+                                {
+                                    Default = Convert.ToBoolean((int)reader["Default"]),
+                                    Path = reader["Path"].ToString(),
+                                    CreatedDate = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                                };
+
+                                images.Add(image);
+                            }
                         }
                     }
                 }
-                return images;
             }
+            catch (Exception ex)
+            {
+                await LogToTable(prodcuctId, productType, "ARTICLE", 0, "Error while fetching product images from database. Error Message: " + ex.Message);
+                int resultUpdate = await UpdateAttribute(prodcuctId, productType, "StatusWMS", "Błąd synchronizacji");
+                if (resultUpdate != 0)
+                {
+                    _logger.Error("Error while updating attribute StatusWMS for product: " + resultUpdate.ToString());
+                }
+
+                _logger.Error(ex, "Error while fetching product images from database");
+                throw new ProcessingException();
+            }
+            return images;
         }
 
         private async Task<List<ProductProvider>> GetProductProvidersAsync(int prodcuctId, int productType)
         {
             List<ProductProvider> providers = new List<ProductProvider>();
-            string procedureName = "kkur.WMSPobierzDostawcowTowaru";
-
-            using (SqlConnection connection = new SqlConnection(_connectionString))
+            try
             {
-                await connection.OpenAsync();
-                using (SqlCommand command = new SqlCommand(procedureName, connection))
+                string procedureName = "kkur.WMSPobierzDostawcowTowaru";
+
+                using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
-                    command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
-
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    await connection.OpenAsync();
+                    using (SqlCommand command = new SqlCommand(procedureName, connection))
                     {
-                        while (await reader.ReadAsync())
-                        {
-                            ProductProvider provider = new ProductProvider()
-                            {
-                                ContractorId = Convert.ToInt32(reader["KntNumer"]),
-                                ContractorSource = "ERP",
-                                Code = reader["Kod"].ToString(),
-                                Symbol = reader["Symbol"].ToString(),
-                                CreatedDate = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-                            };
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
+                        command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
 
-                            providers.Add(provider);
+                        using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                        {
+                            while (await reader.ReadAsync())
+                            {
+                                ProductProvider provider = new ProductProvider()
+                                {
+                                    ContractorId = Convert.ToInt32(reader["KntNumer"]),
+                                    ContractorSource = "ERP",
+                                    Code = reader["Kod"].ToString(),
+                                    Symbol = reader["Symbol"].ToString(),
+                                    CreatedDate = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                                };
+
+                                providers.Add(provider);
+                            }
                         }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                await LogToTable(prodcuctId, productType, "ARTICLE", 0, "Error while fetching product providers from database. Error Message: " + ex.Message);
+                int resultUpdate = await UpdateAttribute(prodcuctId, productType, "StatusWMS", "Błąd synchronizacji");
+                if (resultUpdate != 0)
+                {
+                    _logger.Error("Error while updating attribute StatusWMS for product: " + resultUpdate.ToString());
+                }
+
+                _logger.Error(ex, "Error while fetching product providers from database");
+                throw new ProcessingException();
             }
             return providers;
         }
@@ -359,37 +431,52 @@ namespace PinquarkWMSSynchro
         private async Task<List<ProductUnit>> GetProductUnitsAsync(int prodcuctId, int productType)
         {
             List<ProductUnit> units = new List<ProductUnit>();
-            string procedureName = "kkur.WMSPobierzJMTowaru";
-
-            using (SqlConnection connection = new SqlConnection(_connectionString))
+            try
             {
-                await connection.OpenAsync();
-                using (SqlCommand command = new SqlCommand(procedureName, connection))
+                string procedureName = "kkur.WMSPobierzJMTowaru";
+
+                using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
-                    command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
-
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    await connection.OpenAsync();
+                    using (SqlCommand command = new SqlCommand(procedureName, connection))
                     {
-                        while (await reader.ReadAsync())
-                        {
-                            ProductUnit unit = new ProductUnit()
-                            {
-                                Default = Convert.ToBoolean((int)reader["Glowna"]),
-                                Unit = reader["Kod"].ToString(),
-                                Eans = new List<string> { reader["EAN"].ToString() },
-                                ConverterToMainUnit = Convert.ToInt32(reader["KonwersjaDoGlownej"]),
-                                Height = Convert.ToDecimal(reader["Wysokosc"]),
-                                Length = Convert.ToDecimal(reader["Dlugosc"]),
-                                Width = Convert.ToDecimal(reader["Szerokosc"]),
-                                Weight = Convert.ToDecimal(reader["Waga"])
-                            };
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
+                        command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
 
-                            units.Add(unit);
+                        using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                        {
+                            while (await reader.ReadAsync())
+                            {
+                                ProductUnit unit = new ProductUnit()
+                                {
+                                    Default = Convert.ToBoolean((int)reader["Glowna"]),
+                                    Unit = reader["Kod"].ToString(),
+                                    Eans = new List<string> { reader["EAN"].ToString() },
+                                    ConverterToMainUnit = Convert.ToInt32(reader["KonwersjaDoGlownej"]),
+                                    Height = Convert.ToDecimal(reader["Wysokosc"]),
+                                    Length = Convert.ToDecimal(reader["Dlugosc"]),
+                                    Width = Convert.ToDecimal(reader["Szerokosc"]),
+                                    Weight = Convert.ToDecimal(reader["Waga"])
+                                };
+
+                                units.Add(unit);
+                            }
                         }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                await LogToTable(prodcuctId, productType, "ARTICLE", 0, "Error while fetching product units from database. ERROR Message: " + ex.Message);
+                int resultUpdate = await UpdateAttribute(prodcuctId, productType, "StatusWMS", "Błąd synchronizacji");
+                if (resultUpdate != 0)
+                {
+                    _logger.Error("Error while updating attribute StatusWMS for product: " + resultUpdate.ToString());
+                }
+
+                _logger.Error(ex, "Error while fetching product units from database");
+                throw new ProcessingException();
             }
             return units;
         }
@@ -397,68 +484,83 @@ namespace PinquarkWMSSynchro
         private async Task<List<Models.Attribute>> GetProcuctAttributesAsync(int prodcuctId, int productType)
         {
             List<Models.Attribute> attributes = new List<Models.Attribute>();
-            string procedureName = "kkur.WMSPobierzAtrybutyTowaru";
-
-            using (SqlConnection connection = new SqlConnection(_connectionString))
+            try
             {
-                await connection.OpenAsync();
-                using (SqlCommand command = new SqlCommand(procedureName, connection))
+                string procedureName = "kkur.WMSPobierzAtrybutyTowaru";
+
+                using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
-                    command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
-
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    await connection.OpenAsync();
+                    using (SqlCommand command = new SqlCommand(procedureName, connection))
                     {
-                        while (await reader.ReadAsync())
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = prodcuctId;
+                        command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = productType;
+
+                        using (SqlDataReader reader = await command.ExecuteReaderAsync())
                         {
-                            Models.Attribute attribute = new Models.Attribute()
+                            while (await reader.ReadAsync())
                             {
-                                Symbol = reader["Klasa"].ToString(),
-                                Type = reader["Typ"].ToString(),
-                            };
+                                Models.Attribute attribute = new Models.Attribute()
+                                {
+                                    Symbol = reader["Klasa"].ToString(),
+                                    Type = reader["Typ"].ToString(),
+                                };
 
-                            switch (attribute.Type.ToLower())
-                            {
-                                case "integer":
-                                    attribute.ValueInt = Convert.ToInt32(reader["Wartosc"]);
-                                    break;
-                                case "date":
-                                    attribute.ValueDate = reader["Wartosc"].ToString();
-                                    break;
-                                case "datetime":
-                                    if (DateTime.TryParse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dateTimeValue))
-                                    {
-                                        attribute.ValueDate = dateTimeValue.ToString("yyyy-MM-dd");
-                                        attribute.ValueTime = dateTimeValue.ToString("HH:mm:ss");
-                                    }
-                                    else
-                                    {
-                                        throw new Exception($"Invalid datetime format: {reader["Wartosc"]}");
-                                    }
-                                    break;
-                                case "decimal":
-                                    if (Decimal.TryParse(reader["Wartosc"].ToString(), NumberStyles.Any, new CultureInfo("en-US"), out Decimal value))
-                                    {
-                                        attribute.ValueDecimal = value;
-                                    }
-                                    else
-                                    {
-                                        throw new Exception($"Invalid decimal format: {reader["Wartosc"]}");
-                                    }
-                                    break;
-                                case "text":
-                                    attribute.ValueText = reader["Wartosc"].ToString();
-                                    break;
-                                default:
-                                    throw new Exception($"Unknown type: {attribute.Type}");
+                                switch (attribute.Type.ToLower())
+                                {
+                                    case "integer":
+                                        attribute.ValueInt = Convert.ToInt32(reader["Wartosc"]);
+                                        break;
+                                    case "date":
+                                        attribute.ValueDate = reader["Wartosc"].ToString();
+                                        break;
+                                    case "datetime":
+                                        if (DateTime.TryParse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dateTimeValue))
+                                        {
+                                            attribute.ValueDate = dateTimeValue.ToString("yyyy-MM-dd");
+                                            attribute.ValueTime = dateTimeValue.ToString("HH:mm:ss");
+                                        }
+                                        else
+                                        {
+                                            throw new Exception($"Invalid datetime format: {reader["Wartosc"]}");
+                                        }
+                                        break;
+                                    case "decimal":
+                                        if (Decimal.TryParse(reader["Wartosc"].ToString(), NumberStyles.Any, new CultureInfo("en-US"), out Decimal value))
+                                        {
+                                            attribute.ValueDecimal = value;
+                                        }
+                                        else
+                                        {
+                                            throw new Exception($"Invalid decimal format: {reader["Wartosc"]}");
+                                        }
+                                        break;
+                                    case "text":
+                                        attribute.ValueText = reader["Wartosc"].ToString();
+                                        break;
+                                    default:
+                                        throw new Exception($"Unknown type: {attribute.Type}");
+                                }
+
+
+                                attributes.Add(attribute);
                             }
-
-
-                            attributes.Add(attribute);
                         }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                await LogToTable(prodcuctId, productType, "ARTICLE", 0, "Error while fetching product units from database. ERROR Message: " + ex.Message);
+                int resultUpdate = await UpdateAttribute(prodcuctId, productType, "StatusWMS", "Błąd synchronizacji");
+                if (resultUpdate != 0)
+                {
+                    _logger.Error("Error while updating attribute StatusWMS for product: " + resultUpdate.ToString());
+                }
+
+                _logger.Error(ex, "Error while fetching product units from database");
+                throw new ProcessingException();
             }
             return attributes;
         }
@@ -483,13 +585,12 @@ namespace PinquarkWMSSynchro
                             int clientId = Convert.ToInt32(reader["KntNumer"]);
                             int clientType = Convert.ToInt32(reader["KntTyp"]);
 
-                            updateTasks.Add(UpdateAttribute(clientId, clientType, "StatusWMS", "Przetwarzane"));
-
-                            var attributesTask = GetClientAttributesAsync(clientId, clientType);
-                            var addressesTask = GetClientAddressesAsync(clientId, clientType);
                             try
                             {
+                                updateTasks.Add(UpdateAttribute(clientId, clientType, "StatusWMS", "Przetwarzane"));
 
+                                var attributesTask = GetClientAttributesAsync(clientId, clientType);
+                                var addressesTask = GetClientAddressesAsync(clientId, clientType);
 
                                 Client client = new Client()
                                 {
@@ -525,7 +626,12 @@ namespace PinquarkWMSSynchro
                             }
                             catch (Exception ex)
                             {
-                                await LogToTable(clientId, clientType, "CONTRACTOR", 0, ex.Message);
+                                await LogToTable(clientId, clientType, "CONTRACTOR", 0, "Error while fetching clients from database. ErrorMessage: " + ex.Message);
+                                int resultUpdate = await UpdateAttribute(clientId, clientType, "StatusWMS", "Błąd synchronizacji");
+                                if (resultUpdate != 0)
+                                {
+                                    _logger.Error("Error while updating attribute StatusWMS for client: " + resultUpdate.ToString());
+                                }
                                 _logger.Error(ex, "Error while fetching client from database");
                             }
                         }
@@ -542,68 +648,83 @@ namespace PinquarkWMSSynchro
         private async Task<List<Models.Attribute>> GetClientAttributesAsync(int clientId, int clientType)
         {
             List<Models.Attribute> attributes = new List<Models.Attribute>();
-            string procedureName = "kkur.WMSPobierzAtrybutyKontrahenta";
-
-            using (SqlConnection connection = new SqlConnection(_connectionString))
+            try
             {
-                await connection.OpenAsync();
-                using (SqlCommand command = new SqlCommand(procedureName, connection))
+                string procedureName = "kkur.WMSPobierzAtrybutyKontrahenta";
+
+                using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = clientId;
-                    command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = clientType;
-
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    await connection.OpenAsync();
+                    using (SqlCommand command = new SqlCommand(procedureName, connection))
                     {
-                        while (await reader.ReadAsync())
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = clientId;
+                        command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = clientType;
+
+                        using (SqlDataReader reader = await command.ExecuteReaderAsync())
                         {
-                            Models.Attribute attribute = new Models.Attribute()
+                            while (await reader.ReadAsync())
                             {
-                                Symbol = reader["Klasa"].ToString(),
-                                Type = reader["Typ"].ToString(),
-                            };
+                                Models.Attribute attribute = new Models.Attribute()
+                                {
+                                    Symbol = reader["Klasa"].ToString(),
+                                    Type = reader["Typ"].ToString(),
+                                };
 
-                            switch (attribute.Type.ToLower())
-                            {
-                                case "integer":
-                                    attribute.ValueInt = Convert.ToInt32(reader["Wartosc"]);
-                                    break;
-                                case "date":
-                                    attribute.ValueDate = reader["Wartosc"].ToString();
-                                    break;
-                                case "datetime":
-                                    if (DateTime.TryParse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dateTimeValue))
-                                    {
-                                        attribute.ValueDate = dateTimeValue.ToString("yyyy-MM-dd"); // Extract date part
-                                        attribute.ValueTime = dateTimeValue.ToString("HH:mm:ss");   // Extract time part
-                                    }
-                                    else
-                                    {
-                                        throw new Exception($"Invalid datetime format: {reader["Wartosc"]}");
-                                    }
-                                    break;
-                                case "decimal":
-                                    if (Decimal.TryParse(reader["Wartosc"].ToString(), NumberStyles.Any, new CultureInfo("en-US"), out Decimal value))
-                                    {
-                                        attribute.ValueDecimal = value;
-                                    }
-                                    else
-                                    {
-                                        throw new Exception($"Invalid decimal format: {reader["Wartosc"]}");
-                                    }
-                                    break;
-                                case "text":
-                                    attribute.ValueText = reader["Wartosc"].ToString();
-                                    break;
-                                default:
-                                    throw new Exception($"Unknown type: {attribute.Type}");
+                                switch (attribute.Type.ToLower())
+                                {
+                                    case "integer":
+                                        attribute.ValueInt = Convert.ToInt32(reader["Wartosc"]);
+                                        break;
+                                    case "date":
+                                        attribute.ValueDate = reader["Wartosc"].ToString();
+                                        break;
+                                    case "datetime":
+                                        if (DateTime.TryParse(reader["Wartosc"].ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dateTimeValue))
+                                        {
+                                            attribute.ValueDate = dateTimeValue.ToString("yyyy-MM-dd"); // Extract date part
+                                            attribute.ValueTime = dateTimeValue.ToString("HH:mm:ss");   // Extract time part
+                                        }
+                                        else
+                                        {
+                                            throw new Exception($"Invalid datetime format: {reader["Wartosc"]}");
+                                        }
+                                        break;
+                                    case "decimal":
+                                        if (Decimal.TryParse(reader["Wartosc"].ToString(), NumberStyles.Any, new CultureInfo("en-US"), out Decimal value))
+                                        {
+                                            attribute.ValueDecimal = value;
+                                        }
+                                        else
+                                        {
+                                            throw new Exception($"Invalid decimal format: {reader["Wartosc"]}");
+                                        }
+                                        break;
+                                    case "text":
+                                        attribute.ValueText = reader["Wartosc"].ToString();
+                                        break;
+                                    default:
+                                        throw new Exception($"Unknown type: {attribute.Type}");
+                                }
+
+
+                                attributes.Add(attribute);
                             }
-
-
-                            attributes.Add(attribute);
                         }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                await LogToTable(clientId, clientType, "CONTRACTOR", 0, "Error while fetching client attributes from database. Eroor Message: " + ex.Message);
+                int resultUpdate = await UpdateAttribute(clientId, clientType, "StatusWMS", "Błąd synchronizacji");
+                if (resultUpdate != 0)
+                {
+                    _logger.Error("Error while updating attribute StatusWMS for client: " + resultUpdate.ToString());
+                }
+
+                _logger.Error(ex, "Error while fetching client attributes from database");
+                throw new ProcessingException();
             }
             return attributes;
         }
@@ -611,39 +732,56 @@ namespace PinquarkWMSSynchro
         private async Task<List<ClientAddress>> GetClientAddressesAsync(int clientId, int clientType)
         {
             List<ClientAddress> addresses = new List<ClientAddress>();
-            string procedureName = "kkur.WMSPobierzAdresyKontrahenta";
-
-            using (SqlConnection connection = new SqlConnection(_connectionString))
+            try
             {
-                await connection.OpenAsync();
-                using (SqlCommand command = new SqlCommand(procedureName, connection))
+
+
+                string procedureName = "kkur.WMSPobierzAdresyKontrahenta";
+
+                using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = clientId;
-                    command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = clientType;
-
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    await connection.OpenAsync();
+                    using (SqlCommand command = new SqlCommand(procedureName, connection))
                     {
-                        while (await reader.ReadAsync())
-                        {
-                            ClientAddress address = new ClientAddress()
-                            {
-                                Active = true,
-                                ContractorId = Convert.ToInt32(reader["KntGidNumer"]),
-                                ContractorSource = "ERP",
-                                Code = reader["KodPocztowy"].ToString(),
-                                Name = reader["AdresNazwa"].ToString(),
-                                PostCity = reader["Miasto"].ToString(),
-                                City = reader["Miasto"].ToString(),
-                                Street = reader["Ulica"].ToString(),
-                                Country = reader["Kraj"].ToString(),
-                                DateFrom = reader["DataOd"].ToString()
-                            };
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.Add("@GidNumer", SqlDbType.Int).Value = clientId;
+                        command.Parameters.Add("@GidTyp", SqlDbType.Int).Value = clientType;
 
-                            addresses.Add(address);
+                        using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                        {
+                            while (await reader.ReadAsync())
+                            {
+                                ClientAddress address = new ClientAddress()
+                                {
+                                    Active = true,
+                                    ContractorId = Convert.ToInt32(reader["KntGidNumer"]),
+                                    ContractorSource = "ERP",
+                                    Code = reader["KodPocztowy"].ToString(),
+                                    Name = reader["AdresNazwa"].ToString(),
+                                    PostCity = reader["Miasto"].ToString(),
+                                    City = reader["Miasto"].ToString(),
+                                    Street = reader["Ulica"].ToString(),
+                                    Country = reader["Kraj"].ToString(),
+                                    DateFrom = reader["DataOd"].ToString()
+                                };
+
+                                addresses.Add(address);
+                            }
                         }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                await LogToTable(clientId, clientType, "CONTRACTOR", 0, "Error while fetching client addreses from database. Error Message: " + ex.Message);
+                int resultUpdate = await UpdateAttribute(clientId, clientType, "StatusWMS", "Błąd synchronizacji");
+                if (resultUpdate != 0)
+                {
+                    _logger.Error("Error while updating attribute StatusWMS for client: " + resultUpdate.ToString());
+                }
+
+                _logger.Error(ex, "Error while fetching client addreses from database");
+                throw new ProcessingException();
             }
             return addresses;
         }
@@ -697,6 +835,7 @@ namespace PinquarkWMSSynchro
                     result = await command.ExecuteNonQueryAsync();
                 }
             }
+
             return result;
         }
     }
